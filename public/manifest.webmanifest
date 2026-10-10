@@ -1,0 +1,1 @@
+{"id":"/","name":"Spark Ollama Manager","short_name":"Spark Manager","description":"Private Ollama and MCP control room for DGX Spark. Developed by Solomon.","start_url":"/","scope":"/","display":"standalone","background_color":"#101211","theme_color":"#101211","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}

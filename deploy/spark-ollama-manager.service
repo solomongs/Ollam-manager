@@ -1,0 +1,35 @@
+[Unit]
+Description=Spark Ollama Manager private web interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=spark-ollama
+Group=spark-ollama
+WorkingDirectory=/opt/spark-ollama-manager
+EnvironmentFile=/etc/spark-ollama-manager.env
+ExecStart=/opt/spark-ollama-manager/runtime/node /opt/spark-ollama-manager/server.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/spark-ollama-manager
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

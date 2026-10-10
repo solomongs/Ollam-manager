@@ -1,0 +1,13 @@
+# Runtime state contains administrator credentials, MCP secrets and chat history.
+/data/
+/.env
+/.env.*
+!/.env.example
+/node_modules/
+/coverage/
+/test-results/
+/playwright-report/
+/docs/screenshots/*.png
+*.log
+*.tmp
+.DS_Store
