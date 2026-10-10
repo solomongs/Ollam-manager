@@ -7,6 +7,7 @@ DATA=/var/lib/spark-ollama-manager
 ENV_FILE=/etc/spark-ollama-manager.env
 UNIT_FILE=/etc/systemd/system/spark-ollama-manager.service
 MARKER=/etc/spark-ollama-manager-tailscale.json
+LAUNCH_FILE=/etc/spark-ollama-manager.url
 SERVICE=spark-ollama-manager.service
 SERVICE_USER=spark-ollama
 PROXY=http://127.0.0.1:42010
@@ -18,6 +19,7 @@ HELPER=$SOURCE_DIR/deploy/deployment.mjs
 STAGE=
 BACKUP=
 CHANGED=0
+APP_INSTALLED=0
 SUCCESS=0
 WAS_ACTIVE=0
 WAS_ENABLED=0
@@ -26,6 +28,7 @@ TS_HOST=
 TS_URL=
 NODE_BIN=${NODE_BIN:-}
 TS_HTTPS_VERIFIED=0
+INSTALLATION_MODE=dgx
 
 say() { printf '%s\n' "$*"; }
 die() { say "ERROR: $*" >&2; exit 1; }
@@ -38,6 +41,7 @@ Usage: sudo bash install.sh [--no-tailscale] [--https-port 9443]
 --no-tailscale   Install localhost service without adding a Tailscale route.
 --https-port N   Use an unused private HTTPS port (1024–65535; default 9443).
 --node PATH      Use an existing ARM64 Node binary (for sudo/nvm setups).
+--installation-mode MODE  Record dgx or deb (package maintainer use).
 --help          Show this help.
 
 Requires DGX OS / Ubuntu ARM64, an existing Node.js >=22 and systemd.
@@ -50,12 +54,14 @@ while (($#)); do
     --no-tailscale) USE_TAILSCALE=0; shift ;;
     --https-port) (($# >= 2)) || die '--https-port needs a value'; HTTPS_PORT=$2; shift 2 ;;
     --node) (($# >= 2)) || die '--node needs a path'; NODE_BIN=$2; shift 2 ;;
+    --installation-mode) (($# >= 2)) || die '--installation-mode needs a value'; INSTALLATION_MODE=$2; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) die "Unknown option: $1" ;;
   esac
 done
 [[ $HTTPS_PORT =~ ^[0-9]{4,5}$ ]] && ((10#$HTTPS_PORT >= 1024 && 10#$HTTPS_PORT <= 65535)) || die 'HTTPS port must be 1024–65535.'
 HTTPS_PORT=$((10#$HTTPS_PORT))
+[[ $INSTALLATION_MODE == dgx || $INSTALLATION_MODE == deb ]] || die 'Installation mode must be dgx or deb.'
 
 # All checks before this point and in --check mode are read-only.
 ARCH=$(uname -m)
@@ -71,7 +77,7 @@ NODE=$(readlink -f -- "${NODE_BIN:-$(command -v node)}")
 [[ -d /run/systemd/system ]] || die 'A running systemd host is required. Nothing changed.'
 [[ -f $HELPER && ! -L $HELPER ]] || die 'Source is incomplete: deploy/deployment.mjs. Nothing changed.'
 SOURCE_VERSION=$("$NODE" "$HELPER" source-check "$SOURCE_DIR") || die 'Release source verification failed. Nothing changed.'
-for path in "$APP" "$DATA" "$ENV_FILE" "$UNIT_FILE" "$MARKER"; do
+for path in "$APP" "$DATA" "$ENV_FILE" "$UNIT_FILE" "$MARKER" "$LAUNCH_FILE"; do
   [[ ! -L $path ]] || die "Refusing a symbolic link at managed path $path. Nothing changed."
 done
 if getent passwd "$SERVICE_USER" >/dev/null; then
@@ -130,11 +136,12 @@ cleanup() {
         timeout 20 tailscale serve --bg --https="$HTTPS_PORT" off >/dev/null 2>&1 || true
       fi
     fi
-    if [[ -d $APP ]]; then mv -- "$APP" "$BACKUP/failed-app" || true; fi
+    if ((APP_INSTALLED)) && [[ -d $APP ]]; then mv -- "$APP" "$BACKUP/failed-app" || true; fi
     if [[ -d $BACKUP/app ]]; then mv -- "$BACKUP/app" "$APP" || true; fi
     restore_file env "$ENV_FILE"
     restore_file unit "$UNIT_FILE"
     restore_file tailscale-marker "$MARKER"
+    restore_file launch-url "$LAUNCH_FILE"
     systemctl daemon-reload >/dev/null 2>&1 || true
     if ((WAS_ENABLED)); then systemctl enable "$SERVICE" >/dev/null 2>&1 || true; else systemctl disable "$SERVICE" >/dev/null 2>&1 || true; fi
     if ((WAS_ACTIVE)); then systemctl start "$SERVICE" >/dev/null 2>&1 || true; fi
@@ -162,25 +169,27 @@ if ! getent passwd "$SERVICE_USER" >/dev/null; then
   useradd --system --user-group --home-dir "$DATA" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 runuser -u "$SERVICE_USER" -- "$STAGE/runtime/node" --check "$STAGE/server.mjs" || die 'Copied Node runtime is not executable by the dedicated service account.'
+install -d -m 0700 /opt/spark-ollama-manager-backups
+BACKUP=$(mktemp -d /opt/spark-ollama-manager-backups/install-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX)
+[[ ! -f $ENV_FILE ]] || cp -p -- "$ENV_FILE" "$BACKUP/env"
+[[ ! -f $UNIT_FILE ]] || cp -p -- "$UNIT_FILE" "$BACKUP/unit"
+[[ ! -f $MARKER ]] || cp -p -- "$MARKER" "$BACKUP/tailscale-marker"
+[[ ! -f $LAUNCH_FILE ]] || cp -p -- "$LAUNCH_FILE" "$BACKUP/launch-url"
+CHANGED=1
+if ((WAS_ACTIVE)); then systemctl stop "$SERVICE"; else systemctl stop "$SERVICE" >/dev/null 2>&1 || true; fi
+if [[ -d $APP ]]; then mv -- "$APP" "$BACKUP/app"; fi
+mv -- "$STAGE" "$APP"
+APP_INSTALLED=1
+STAGE=
+HELPER=$APP/deploy/deployment.mjs
+# The old service and its stdio children must be stopped before privileged
+# operations on their writable directories, so children cannot swap symlinks.
 [[ ! -L $DATA/imports ]] || die 'Refusing a symbolic link at the managed imports folder.'
 [[ ! -L $DATA/mcp-workspaces ]] || die 'Refusing a symbolic link at the managed MCP workspace folder.'
 install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 0700 "$DATA" "$DATA/imports" "$DATA/mcp-workspaces"
 if [[ -n $(find "$DATA" -maxdepth 1 -type f ! -user "$SERVICE_USER" -print -quit) ]]; then
   die 'Existing state files belong to another user. Resolve ownership explicitly before installation.'
 fi
-
-install -d -m 0700 /opt/spark-ollama-manager-backups
-BACKUP=$(mktemp -d /opt/spark-ollama-manager-backups/install-$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX)
-[[ ! -f $ENV_FILE ]] || cp -p -- "$ENV_FILE" "$BACKUP/env"
-[[ ! -f $UNIT_FILE ]] || cp -p -- "$UNIT_FILE" "$BACKUP/unit"
-[[ ! -f $MARKER ]] || cp -p -- "$MARKER" "$BACKUP/tailscale-marker"
-CHANGED=1
-systemctl stop "$SERVICE" >/dev/null 2>&1 || true
-if [[ -d $APP ]]; then mv -- "$APP" "$BACKUP/app"; fi
-mv -- "$STAGE" "$APP"
-STAGE=
-HELPER=$APP/deploy/deployment.mjs
-
 ORIGIN=
 if [[ -f $ENV_FILE ]]; then ORIGIN=$("$NODE" "$HELPER" env-origin "$ENV_FILE"); fi
 if ((USE_TAILSCALE)) && command -v tailscale >/dev/null; then
@@ -204,7 +213,7 @@ fi
 
 ENV_INPUT=-
 [[ ! -f $ENV_FILE ]] || ENV_INPUT=$ENV_FILE
-"$NODE" "$HELPER" env-write "$ENV_INPUT" "$BACKUP/new-env" "$ORIGIN"
+"$NODE" "$HELPER" env-write "$ENV_INPUT" "$BACKUP/new-env" "$ORIGIN" "$INSTALLATION_MODE"
 install -o root -g root -m 0600 "$BACKUP/new-env" "$ENV_FILE"
 install -o root -g root -m 0644 "$APP/deploy/spark-ollama-manager.service" "$UNIT_FILE"
 systemctl daemon-reload
@@ -242,7 +251,7 @@ if ((USE_TAILSCALE)) && [[ -z $TS_URL ]]; then
     "$NODE" "$HELPER" marker-write "$MARKER" "$TS_HOST" "$HTTPS_PORT" "$PROXY"
     chown root:root "$MARKER"
     chmod 0600 "$MARKER"
-    "$NODE" "$HELPER" env-write "$ENV_FILE" "$BACKUP/https-env" "$TS_URL"
+    "$NODE" "$HELPER" env-write "$ENV_FILE" "$BACKUP/https-env" "$TS_URL" "$INSTALLATION_MODE"
     install -o root -g root -m 0600 "$BACKUP/https-env" "$ENV_FILE"
     systemctl restart "$SERVICE"
     healthy || die 'Manager failed after setting its HTTPS origin.'
@@ -250,6 +259,8 @@ if ((USE_TAILSCALE)) && [[ -z $TS_URL ]]; then
     say 'The manager is healthy locally. No working private HTTPS URL was detected.'
   fi
 fi
+printf '%s\n' "${TS_URL:-${ORIGIN:-$PROXY}}" > "$BACKUP/launch-url-new"
+install -o root -g root -m 0644 "$BACKUP/launch-url-new" "$LAUNCH_FILE"
 SUCCESS=1
 if [[ -n $TS_URL ]] && curl --silent --show-error --fail --max-time 10 "$TS_URL/api/health" > "$BACKUP/https-health.json" 2>/dev/null; then
   if "$NODE" "$HELPER" health-check "$SOURCE_VERSION" "$BACKUP/https-health.json"; then

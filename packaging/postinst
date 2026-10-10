@@ -1,0 +1,18 @@
+#!/bin/bash
+set -Eeuo pipefail
+case "${1:-}" in
+  configure)
+    args=(--node /usr/lib/spark-ollama-manager-bundle/runtime/node --installation-mode deb)
+    if [[ -L /etc/spark-ollama-manager-tailscale.json ]]; then
+      printf '%s\n' 'Managed Tailscale marker is a symbolic link; refusing configuration.' >&2
+      exit 1
+    fi
+    if [[ -f /etc/spark-ollama-manager-tailscale.json ]]; then
+      port=$(/usr/lib/spark-ollama-manager-bundle/runtime/node /usr/lib/spark-ollama-manager-bundle/app/deploy/deployment.mjs marker-port /etc/spark-ollama-manager-tailscale.json)
+      args+=(--https-port "$port")
+    fi
+    /bin/bash /usr/lib/spark-ollama-manager-bundle/app/install.sh "${args[@]}"
+    ;;
+  abort-upgrade|abort-remove|abort-deconfigure) ;;
+esac
+exit 0

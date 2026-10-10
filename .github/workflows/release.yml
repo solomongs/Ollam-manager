@@ -1,0 +1,201 @@
+name: Test and publish installers
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      publish: ${{ steps.meta.outputs.publish }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          publish=false
+          if [[ "$GITHUB_REPOSITORY" == solomongs/Ollam-manager && "$GITHUB_REF" == refs/heads/main && "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            if ! gh release view "v$version" >/dev/null 2>&1; then publish=true; fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - run: npm test
+      - run: bash -n install.sh uninstall.sh
+      - name: Nonroot container startup and login
+        run: |
+          docker build -t spark-manager:ci .
+          trap 'docker rm -f -v spark-manager-ci >/dev/null 2>&1 || true' EXIT
+          docker run -d --name spark-manager-ci --read-only --tmpfs /tmp --add-host host.docker.internal:host-gateway -p 127.0.0.1:42010:42010 spark-manager:ci
+          curl --fail --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:42010/api/health > /tmp/container-health.json
+          docker exec spark-manager-ci sh -c 'test "$(id -u)" = 10001 && test -s /data/first-login.txt'
+          docker exec spark-manager-ci node -e "const fs=require('fs');fetch('http://127.0.0.1:42010/api/login',{method:'POST',headers:{'Content-Type':'application/json','Origin':'http://127.0.0.1:42010'},body:JSON.stringify({password:fs.readFileSync('/data/first-login.txt','utf8').trim()})}).then(async r=>{if(!r.ok)throw new Error(await r.text())}).catch(e=>{console.error(e);process.exit(1)})"
+      - name: Browser workflows and responsive UI
+        run: |
+          npm install --no-save --package-lock=false playwright@1.58.2
+          npx playwright install --with-deps chromium
+          node tests/browser-smoke.mjs
+
+  windows:
+    needs: [metadata, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: windows-2025
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - name: Windows backend, MCP and desktop tests
+        run: node --test tests/*.test.mjs desktop/tests/*.test.mjs packaging/*.test.mjs
+      - run: npm --prefix desktop ci
+      - name: Build per-user desktop installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm --prefix desktop run build -- --win --${{ matrix.arch }}
+      - name: Install and smoke-test packaged application
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/dist/*-windows-${{ matrix.arch }}-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw 'Windows installer missing' }
+          $target = Join-Path $env:RUNNER_TEMP 'spark-installed'
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$target") -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          node desktop/smoke-packaged.mjs "$target/Spark Ollama Manager.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop smoke failed' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-${{ matrix.arch }}
+          path: desktop/dist/*-windows-${{ matrix.arch }}-setup.exe
+          if-no-files-found: error
+
+  dgx:
+    needs: [metadata, test]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.23.3
+      - run: npm test
+      - run: node packaging/build-deb.mjs
+      - name: Install, start, upgrade and remove ARM64 package
+        run: |
+          package=$(find dist -maxdepth 1 -name '*.deb' -print -quit)
+          test -n "$package"
+          sudo apt-get install -y "$(realpath "$package")"
+          curl --fail --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:42010/api/health > /tmp/spark-health.json
+          node -e "const p=require('/tmp/spark-health.json');if(!p.ok||p.version!=='${{ needs.metadata.outputs.version }}')process.exit(1)"
+          sudo test -s /var/lib/spark-ollama-manager/first-login.txt
+          sudo runuser -u spark-ollama -- sh -c 'echo persisted > /var/lib/spark-ollama-manager/ci-preserved.txt'
+          sudo dpkg -i "$package"
+          sudo grep -q persisted /var/lib/spark-ollama-manager/ci-preserved.txt
+          sudo dpkg --remove spark-ollama-manager
+          sudo grep -q persisted /var/lib/spark-ollama-manager/ci-preserved.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dgx-arm64
+          path: dist/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: [metadata, test, windows, dgx]
+    if: needs.metadata.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Publish installers, source and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          git archive --format=zip --prefix=Spark-Ollama-Manager/ HEAD -o "release-assets/Spark-Ollama-Manager-$VERSION-source.zip"
+          (cd release-assets && sha256sum *.exe *.deb *.zip > SHA256SUMS)
+          node scripts/release-notes.mjs /tmp/release-notes.md
+          gh release create "v$VERSION" release-assets/* --target "$GITHUB_SHA" --title "Spark Ollama Manager $VERSION" --notes-file /tmp/release-notes.md
+
+  container:
+    needs: [metadata, release]
+    if: needs.metadata.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish package for Linux ARM64 and AMD64
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/solomongs/ollam-manager:${{ needs.metadata.outputs.version }}
+            ghcr.io/solomongs/ollam-manager:latest
+          labels: |
+            org.opencontainers.image.version=${{ needs.metadata.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Check anonymous package access
+        run: |
+          docker logout ghcr.io
+          if docker pull ghcr.io/solomongs/ollam-manager:${{ needs.metadata.outputs.version }}; then
+            echo 'Container is publicly downloadable.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Package published. Owner must set package visibility to Public in its GitHub package settings before anonymous installation works.' >> "$GITHUB_STEP_SUMMARY"
+          fi

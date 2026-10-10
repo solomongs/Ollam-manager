@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!server.mjs
+!mcp-client.mjs
+!package.json
+!public/
+!public/**
+!scripts/
+!scripts/password.mjs

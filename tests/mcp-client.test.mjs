@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {readFile} from 'node:fs/promises';
-import { validateMcpConfig,validateMcpTarget,publicMcpConfig,createMcpClient,MCP_PROTOCOL_VERSIONS } from '../mcp-client.mjs';
+import os from 'node:os';
+import { validateMcpConfig,validateMcpTarget,publicMcpConfig,createMcpClient,MCP_PROTOCOL_VERSIONS,validateMcpExecutable,windowsProcessTreeCommand } from '../mcp-client.mjs';
 
 async function fixture(t,options={}) {
   const calls=[]; let lastRequest;
@@ -115,8 +116,8 @@ test('immediate close during asynchronous configuration never dispatches initial
   await assert.rejects(pending,/closed/);assert.equal(f.calls.length,0);
 });
 
-const stdioScript=`const rl=require('node:readline').createInterface({input:process.stdin});rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;let result;if(m.method==='initialize')result={protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'stdio-fixture',version:'1'}};else if(m.method==='tools/list')result={tools:[{name:'echo',inputSchema:{type:'object'}}]};else result={content:[{type:'text',text:JSON.stringify({value:m.params.arguments.text,uid:process.getuid?.(),env:process.env.FIXTURE_TOKEN,unrelated:process.env.UNRELATED_SECRET})}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`;
-function stdioConfig(script=stdioScript) {return {name:'Stdio fixture',transport:'stdio',command:process.execPath,args:['-e',script],cwd:'/tmp',env:{FIXTURE_TOKEN:'fixture-only'}};}
+const stdioScript=`const worker=process.platform==='win32'?require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore',windowsHide:true}):null;const rl=require('node:readline').createInterface({input:process.stdin});rl.on('line',line=>{const m=JSON.parse(line);if(m.id===undefined)return;let result;if(m.method==='initialize')result={protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'stdio-fixture',version:'1'}};else if(m.method==='tools/list')result={tools:[{name:'echo',inputSchema:{type:'object'}}]};else result={content:[{type:'text',text:JSON.stringify({value:m.params.arguments.text,uid:process.getuid?.(),env:process.env.FIXTURE_TOKEN,unrelated:process.env.UNRELATED_SECRET,workerPid:worker?.pid,systemRoot:process.env.SystemRoot,temporary:process.env.TEMP,profile:process.env.USERPROFILE})}]};process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`;
+function stdioConfig(script=stdioScript) {return {name:'Stdio fixture',transport:'stdio',command:process.execPath,args:['-e',script],cwd:os.tmpdir(),env:{FIXTURE_TOKEN:'fixture-only'}};}
 async function canSpawnNonroot() {
   if(typeof process.getuid !== 'function' || process.getuid() !== 0) return true;
   try { const mappings=(await readFile('/proc/self/uid_map','utf8')).trim().split('\n').map(line=>line.trim().split(/\s+/).map(Number));return mappings.some(([inside,_outside,length])=>65534>=inside && 65534<inside+length); } catch {return false;}
@@ -138,13 +139,24 @@ test('stdio fixture negotiates legacy protocol over stdio, uses nonroot/minimal 
   const updated=await validateMcpConfig({name:'Renamed'},config);assert.equal(updated.env.FIXTURE_TOKEN,'fixture-only');
   const publicConfig=publicMcpConfig(updated);assert.deepEqual(publicConfig.envKeys,['FIXTURE_TOKEN']);assert.equal('env' in publicConfig,false);
   const client=createMcpClient(config,childOptions());
+  let workerPid;
   try {
     assert.equal((await client.initialize()).protocolVersion,'2024-11-05');
     assert.equal((await client.listTools())[0].name,'echo');
     const value=JSON.parse((await client.callTool('echo',{text:'stdio'})).content[0].text);
     assert.equal(value.value,'stdio');assert.equal(value.env,'fixture-only');assert.equal(value.unrelated,undefined);
-    if(value.uid!==undefined) assert.notEqual(value.uid,0);
+    if(typeof process.getuid === 'function') assert.notEqual(value.uid,0);
+    else assert.equal(value.uid,undefined);
+    if (process.platform === 'win32') {
+      workerPid=value.workerPid;assert.equal(typeof workerPid,'number');
+      assert.equal(value.systemRoot,process.env.SystemRoot);assert.equal(value.temporary,process.env.TEMP);assert.equal(value.profile,process.env.USERPROFILE);
+    }
   } finally {await client.close();if(previous===undefined)delete process.env.UNRELATED_SECRET;else process.env.UNRELATED_SECRET=previous;}
+  if (process.platform === 'win32') {
+    let gone=false;
+    for(let attempt=0;attempt<20;attempt++) { try { process.kill(workerPid,0); } catch { gone=true;break; } await new Promise(resolve=>setTimeout(resolve,50)); }
+    assert.equal(gone,true,'Closing MCP must terminate its Windows grandchild process as well as the server.');
+  }
 });
 
 test('stdio refuses root execution without a trusted positive UID',async()=>{
@@ -159,4 +171,23 @@ test('stdio malformed output and hanging subprocess cleanup are bounded',async t
   await assert.rejects(malformed.initialize(),/JSON-RPC|exited/);await malformed.close();
   const hanging=createMcpClient(stdioConfig("process.on('SIGTERM',()=>{});process.stdin.resume();setInterval(()=>{},1000)"),{...childOptions(),timeout:75});
   const started=Date.now();await assert.rejects(hanging.initialize(),/timed out/);await hanging.close();assert.ok(Date.now()-started<2000);
+});
+
+
+test('MCP executable policy uses Windows .exe files without requiring POSIX execute bits',()=>{
+  const file={isFile:()=>true,mode:0o600},directory={isDirectory:()=>true};
+  assert.doesNotThrow(()=>validateMcpExecutable('C:\\Program Files\\nodejs\\node.exe',file,directory,'win32'));
+  assert.doesNotThrow(()=>validateMcpExecutable('C:\\Tools\\PYTHON.EXE',file,directory,'win32'));
+  for(const extension of ['cmd','bat','ps1','vbs','js'])assert.throws(()=>validateMcpExecutable(`C:\\Tools\\server.${extension}`,file,directory,'win32'),/\.exe/);
+  assert.throws(()=>validateMcpExecutable('node.exe',file,directory,'win32'),/absolute/);
+  assert.throws(()=>validateMcpExecutable('C:\\Tools\\folder.exe',{isFile:()=>false,mode:0o777},directory,'win32'),/regular file/);
+  assert.throws(()=>validateMcpExecutable('/usr/bin/node',file,directory,'linux'),/execute permission/);
+  assert.doesNotThrow(()=>validateMcpExecutable('/usr/bin/node',{isFile:()=>true,mode:0o755},directory,'linux'));
+});
+
+test('Windows MCP process-tree cleanup has a fixed executable and numeric child PID arguments',()=>{
+  assert.deepEqual(windowsProcessTreeCommand(12345,'C:\\Windows'),{command:'C:\\Windows\\System32\\taskkill.exe',args:['/PID','12345','/T','/F']});
+  assert.equal(windowsProcessTreeCommand(9,'D:\\Windows').command,'D:\\Windows\\System32\\taskkill.exe');
+  for(const pid of ['1 & whoami',0,-1,NaN,Infinity,1.5])assert.throws(()=>windowsProcessTreeCommand(pid,'C:\\Windows'),/process ID/);
+  for(const root of ['relative-path','\\\\remote\\Windows','C:\\Windows\0evil'])assert.throws(()=>windowsProcessTreeCommand(12345,root),/system directory/);
 });

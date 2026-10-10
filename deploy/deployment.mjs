@@ -9,7 +9,7 @@ export const requiredSourceFiles = Object.freeze([
   'package.json', 'server.mjs', 'mcp-client.mjs', 'install.sh', 'uninstall.sh',
   'public/index.html', 'public/app.js', 'public/style.css', 'public/icon.svg',
   'public/manifest.webmanifest', 'public/sw.js',
-  'deploy/deployment.mjs', 'deploy/spark-ollama-manager.service', 'scripts/password.mjs',
+  'deploy/deployment.mjs', 'deploy/spark-ollama-manager.service', 'scripts/password.mjs', 'scripts/update.mjs',
 ]);
 
 export const installedSourceItems = Object.freeze([
@@ -113,16 +113,17 @@ export function tailscaleHostname(status) {
   return host;
 }
 
-export function environmentFile(existing = '', origin = '') {
+export function environmentFile(existing = '', origin = '', installationMode = 'dgx') {
   if (origin && !/^https:\/\/[a-z0-9.-]+\.ts\.net:\d+$/.test(origin)) throw new Error('Invalid public origin.');
-  const replaced = new Set(['HOST', 'PORT', 'DATA_DIR', 'PUBLIC_ORIGIN']);
+  if (!['dgx', 'deb'].includes(installationMode)) throw new Error('Unsupported installation mode.');
+  const replaced = new Set(['HOST', 'PORT', 'DATA_DIR', 'PUBLIC_ORIGIN', 'SPARK_INSTALLATION_MODE']);
   const lines = existing.split(/\r?\n/).filter(line => !replaced.has(line.match(/^\s*([A-Z_]+)\s*=/)?.[1]));
   const has = name => lines.some(line => new RegExp(`^\\s*${name}\\s*=`).test(line));
   const defaults = [];
   if (!has('OLLAMA_URL')) defaults.push('OLLAMA_URL=http://127.0.0.1:11434');
   if (!has('IMPORT_ROOTS')) defaults.push('IMPORT_ROOTS=/var/lib/spark-ollama-manager/imports');
   return [...lines.filter((line, index) => line || index < lines.length - 1),
-    ...defaults, 'HOST=127.0.0.1', 'PORT=42010', 'DATA_DIR=/var/lib/spark-ollama-manager',
+    ...defaults, 'HOST=127.0.0.1', 'PORT=42010', 'DATA_DIR=/var/lib/spark-ollama-manager', `SPARK_INSTALLATION_MODE=${installationMode}`,
     ...(origin ? [`PUBLIC_ORIGIN=${origin}`] : [])].join('\n') + '\n';
 }
 
@@ -148,7 +149,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       console.log(marker.port);
     } else if (mode === 'env-write') {
       const existing = args[0] === '-' ? '' : readFileSync(args[0], 'utf8');
-      writeFileSync(args[1], environmentFile(existing, args[2] || ''), { mode: 0o600 });
+      writeFileSync(args[1], environmentFile(existing, args[2] || '', args[3] || 'dgx'), { mode: 0o600 });
     } else if (mode === 'env-origin') {
       const text = readFileSync(args[0], 'utf8');
       const value = text.split(/\r?\n/).map(line => line.match(/^PUBLIC_ORIGIN=(.*)$/)?.[1]).filter(value => value !== undefined).at(-1) || '';

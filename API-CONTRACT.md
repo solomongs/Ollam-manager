@@ -1,12 +1,12 @@
-# Spark Ollama Manager API contract
+# Spark Ollama Manager 1.2.0 API contract
 
-Version 1.1.0. Developed by Solomon.
+Version 1.2.0. Developed by Solomon.
 
 Node.js >=22, built-in modules only. All API responses JSON except NDJSON streams.
 Errors: `{error: "plain message"}` with appropriate non-2xx status.
 Cookie sessions; all mutating API calls require `X-CSRF-Token` from session/login response. Same-origin Origin enforcement. No token in URL.
 
-- GET /api/session -> `{authenticated, csrf?, branding:{title,subtitle}}`
+- GET /api/session -> `{authenticated, csrf?, branding:{title,subtitle,developedBy}}`
 - POST /api/login `{password}` -> `{authenticated:true,csrf}`
 - POST /api/logout -> `{ok:true}`
 - GET /api/state -> `{settings:{title,subtitle},servers:[{id,name,url}],activeServerId,mcpServers:[sanitized connection],jobs:[...],chats:[{id,title,serverId,model,updatedAt}]}`
@@ -28,19 +28,67 @@ Cookie sessions; all mutating API calls require `X-CSRF-Token` from session/logi
 - DELETE /api/chats/:id -> ok
 - POST /api/chat `{chatId?,serverId,model,message,images?:[base64],system?,options?:{temperature,num_ctx},keep_alive?,mcpServerIds?:[]}` -> NDJSON chunks `{chatId}`, `{message:{role,content?,thinking?},done?,eval_count?,eval_duration?}` and final `{saved:true,chatId}`. Backend persists successful history; stream abort persists partial safely. MCP connections are opt-in; omit `mcpServerIds` or supply an empty array for ordinary chat. Up to eight enabled connections can be selected. Each proposed MCP tool call waits for a separate authenticated approval before execution.
 - POST /api/chat/:chatId/tool-decision `{callId,approved:boolean}` -> `{ok:true}`. Requires the same session that opened the active chat stream and its CSRF token. The call must still be pending; approval is specific to one call, not to all tools in a conversation.
-- GET /api/health -> unauthenticated `{ok:true,version}`
+- GET /api/health -> unauthenticated `{ok:true,version,developedBy}`
+
+## Update metadata
+
+- GET /api/updates -> authenticated, read-only update metadata. Does not contact GitHub unless a cached check already exists.
+- GET /api/updates?check=1 -> checks the fixed official GitHub Releases API, returning the same response shape. Results, including unavailable results, are cached in memory for five minutes; concurrent checks share one request.
+
+```json
+{
+  "installedVersion": "1.2.0",
+  "platform": "linux",
+  "arch": "arm64",
+  "installationMode": "deb",
+  "repositoryUrl": "https://github.com/solomongs/Ollam-manager",
+  "sourceUrl": "https://github.com/solomongs/Ollam-manager/archive/refs/heads/main.zip",
+  "releasesUrl": "https://github.com/solomongs/Ollam-manager/releases",
+  "releaseApiUrl": "https://api.github.com/repos/solomongs/Ollam-manager/releases/latest",
+  "packages": {
+    "windows": {
+      "url": "https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe",
+      "label": "Windows installer (x64)",
+      "x64Url": "https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe",
+      "x64Label": "Windows installer (x64)",
+      "arm64Url": "https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-arm64-setup.exe",
+      "arm64Label": "Windows installer (ARM64)"
+    },
+    "dgx": {
+      "url": "https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/spark-ollama-manager_1.2.0_arm64.deb",
+      "label": "DGX Spark package (ARM64)"
+    },
+    "source": {
+      "url": "https://github.com/solomongs/Ollam-manager/archive/refs/tags/v1.2.0.zip",
+      "label": "Source archive (1.2.0)"
+    }
+  },
+  "update": {
+    "command": "sudo apt install ./spark-ollama-manager_1.2.0_arm64.deb",
+    "gitCommand": "git pull --ff-only",
+    "instructions": "Download the official DGX ARM64 package, run the command from its download folder, and reopen the manager. The package keeps settings and model files separate from application code."
+  },
+  "latest": { "status": "not-checked" }
+}
+```
+
+`platform` and `arch` describe the manager host. `SPARK_INSTALLATION_MODE` accepts `desktop`, `deb`, `dgx`, `service`, `source` or `container`, defaulting to `source`; the embedded desktop runtime sets `desktop` explicitly. A Windows ARM64 desktop uses the ARM64 URL as its main Windows download, while both Windows architecture URLs remain available. `latest.status` is `not-checked`, `current`, `available` or `unavailable`; a completed check adds `checkedAt`, a valid stable release adds `version`, and an unavailable check adds `error`. Version comparison uses numeric stable semantic-version components. Download URLs advance only for a newer release; an older remote release never recommends a downgrade.
+
+Only `check=1` is accepted; unknown or duplicate query parameters return HTTP 400. The release check always uses the literal `https://api.github.com/repos/solomongs/Ollam-manager/releases/latest`, validates and pins public DNS addresses, requires normal TLS verification, refuses redirects, limits its JSON response to 512 KiB and stops after five seconds. Server shutdown cancels pending checks. GitHub response URLs and asset URLs are ignored: package links are constructed from the fixed official repository, validated version and known filenames. Offline, unpublished or invalid release metadata produces `latest.status:"unavailable"` while retaining usable local metadata and instructions.
+
+The endpoint writes no application files and executes no commands. There is no POST update/download/install endpoint. `update.command`, `gitCommand` and `instructions` are copyable guidance: package users install a downloaded newer package, source users run `scripts/update.mjs` from a clean official Git checkout and restart/redeploy, and container users pull/recreate the official image while retaining their persistent volume. Desktop and container modes can return an empty `command` with platform-specific instructions. `gitCommand` applies to a source checkout only; it is not an updater for an installed `.exe` or `.deb`.
 
 ## MCP connection endpoints
 
 - GET /api/mcp/servers -> sanitized saved connection list.
-- POST /api/mcp/servers `{id?,name,transport:'http'|'stdio',enabled,url?,bearerToken?,command?,args?:[],env?:{},cwd?}` -> sanitized saved connection. Supplying `id` updates that connection. HTTP requires an MCP endpoint URL; stdio requires an absolute executable path, optional JSON argument array/environment object, and optional absolute working directory. No shell interpolation is performed.
+- POST /api/mcp/servers `{id?,name,transport:'http'|'stdio',enabled,url?,bearerToken?,command?,args?:[],env?:{},cwd?}` -> sanitized saved connection. Supplying `id` updates that connection. HTTP requires an MCP endpoint URL; stdio requires an absolute executable path, optional JSON argument array/environment object, and optional absolute working directory. Windows commands must be regular `.exe` files; scripts are arguments to an executable such as Node or Python. POSIX commands require execute permission. No shell interpolation is performed.
 - DELETE /api/mcp/servers/:id -> `{ok:true}`.
 - POST /api/mcp/servers/:id/test -> `{ok,serverInfo,protocolVersion,tools:[]}`. Initializes and discovers tools; it does not call a discovered tool.
 - GET /api/mcp/servers/:id/tools -> `{tools:[]}`. Tool records contain names, descriptions and JSON input schemas returned by the MCP server.
 
 Connection responses contain no saved bearer token or environment values. Public fields include `hasToken:boolean` and `envKeys:[]`, alongside the nonsecret connection fields. Omit `bearerToken`/`env` when updating to preserve them; use `bearerToken:""`/`env:{}` to clear them. Credentials reside in protected mode-0600 state files, not in browser storage or URL query strings. Programs can receive configured secrets through their environment. Administrators should keep secrets out of visible command arguments.
 
-Supported transports are local stdio and Streamable HTTP with JSON/SSE responses and optional bearer authentication. The client advertises revision `2025-11-25`, accepting negotiation to `2025-06-18`, `2025-03-26` or `2024-11-05`; later draft revisions are not supported. OAuth authorization, legacy separate HTTP+SSE endpoints, resource browsing, prompt templates, and exposing the manager itself as an MCP server are not implemented. Stdio launch is refused when the manager runs as root. Installed stdio processes run as the manager service account and inherit its systemd filesystem restrictions.
+Supported transports are local stdio and Streamable HTTP with JSON/SSE responses and optional bearer authentication. The client advertises revision `2025-11-25`, accepting negotiation to `2025-06-18`, `2025-03-26` or `2024-11-05`; later draft revisions are not supported. OAuth authorization, legacy separate HTTP+SSE endpoints, resource browsing, prompt templates, and exposing the manager itself as an MCP server are not implemented. Stdio launch is refused when the manager runs as root. Installed DGX stdio processes run as the manager service account and inherit its systemd filesystem restrictions. Windows desktop stdio processes run as the desktop user, receive a limited set of essential Windows profile/system/temp environment variables plus explicitly configured values, and are closed with bounded, best-effort process-tree cleanup without a shell. Cancelling an approved tool request cannot undo side effects that already occurred.
 
 HTTP targets must be direct URLs without query strings, fragments or embedded credentials; redirects are refused. Public targets require HTTPS, while private/loopback targets can use HTTP. DNS addresses are validated and pinned for each request; metadata, link-local and reserved targets are blocked. Transport limits include 256 KiB JSON request/configuration size, 2 MiB JSON/SSE response size, 500 tools across at most 20 catalog pages, and at most four simultaneous stdio processes. Stdio args and environment each allow at most 64 entries. Connection tests/discovery use a 15-second request timeout; MCP operations during chat use 30 seconds. At most 32 connections can be saved. Updates/deletion are refused while an active chat uses that connection.
 

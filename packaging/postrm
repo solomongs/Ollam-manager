@@ -1,0 +1,8 @@
+#!/bin/bash
+set -Eeuo pipefail
+case "${1:-}" in
+  remove|purge)
+    printf '%s\n' 'User state, credentials, imports, MCP workspaces, service account, backups and Ollama models were preserved.'
+    ;;
+esac
+exit 0

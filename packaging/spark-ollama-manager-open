@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/lib/spark-ollama-manager-bundle/runtime/node /usr/lib/spark-ollama-manager-bundle/open-manager.mjs "$@"

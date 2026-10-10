@@ -164,6 +164,13 @@ try {
   await page.locator('#settings-form [name=title]').fill('Solomon’s Spark');
   await page.locator('#settings-form button[type=submit]').click();
   assert.equal((await currentState()).settings.title,'Solomon’s Spark');
+  const updateMetadata = await page.evaluate(async()=>await (await fetch('/api/updates')).json());
+  await page.locator('#updates-panel').waitFor();
+  await page.locator('#update-current-version').filter({hasText:updateMetadata.installedVersion}).waitFor();
+  assert.equal((await page.locator('#update-git-command').textContent()).trim(),updateMetadata.update.gitCommand,'Git update instructions match host metadata');
+  assert.ok(await page.locator('[data-action=check-updates]').isVisible(),'Explicit latest-release check is available');
+  assert.ok(await page.locator('[data-action=copy-git-command]').isVisible(),'Git source updates are available on every device');
+  assert.ok((await page.locator('#updates-panel').textContent()).includes('Manager host'),'Updates distinguish manager platform from browser device');
   await navigate('overview');
   await page.locator('main h1').filter({hasText:'Solomon’s Spark'}).waitFor();
   const cacheURLs=await page.evaluate(async()=> {
@@ -192,7 +199,7 @@ try {
   await page.locator('.mobile-nav [data-page=overview]').click();
   if(screenshotDir) await page.screenshot({path:path.join(screenshotDir,'mobile-overview.png'),fullPage:false,animations:'disabled'});
   assert.deepEqual(errors,[],'Browser console and page errors');
-  console.log('Browser verification passed: desktop workflows, MCP CRUD/discovery, hidden credentials, approved/denied tool chat and saved history, branding, PWA API exclusion, 360/390/430/768px navigation and layout.');
+  console.log('Browser verification passed: desktop workflows, MCP CRUD/discovery, hidden credentials, approved/denied tool chat and saved history, branding, Updates metadata and Git commands, PWA API exclusion, 360/390/430/768px navigation and layout.');
 } catch (error) {
   console.error('Browser failure:',error.message);
   console.error(await page.evaluate(()=>({hash:location.hash,dialogOpen:document.querySelector('#dialog').open,dialogText:document.querySelector('#dialog').innerText,toast:document.querySelector('#toast').innerText})));

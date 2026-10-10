@@ -1,14 +1,16 @@
 {
   "name": "spark-ollama-manager",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "Private Ollama and MCP web manager for DGX Spark, developed by Solomon",
   "author": "Solomon",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test tests/*.test.mjs deploy/*.test.mjs"
+    "test": "node --test tests/*.test.mjs deploy/*.test.mjs packaging/*.test.mjs desktop/tests/*.test.mjs"
   },
   "license": "MIT"
 }

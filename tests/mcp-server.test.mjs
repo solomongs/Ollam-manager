@@ -102,7 +102,7 @@ test('MCP configuration CRUD/test/tools redacts secrets and transport switching 
   const stdio=await f.request('/api/mcp/servers',{method:'POST',auth:f.auth,body:{id:connection.id,name:'Local',transport:'stdio',enabled:true,command:process.execPath,args:[],env:{PRIVATE_TEST:SECRET}}});assert.equal(stdio.status,200);assert.equal(stdio.data.url,undefined);assert.equal(stdio.data.hasToken,false);assert.deepEqual(stdio.data.envKeys,['PRIVATE_TEST']);assert.equal(stdio.data.env,undefined);
   const httpAgain=await f.request('/api/mcp/servers',{method:'POST',auth:f.auth,body:{id:connection.id,name:'Remote',transport:'http',enabled:true,url:f.mcpUrl}});assert.equal(httpAgain.status,200);assert.equal(httpAgain.data.command,undefined);assert.equal(httpAgain.data.envKeys,undefined);
   const persisted=JSON.parse(await fs.readFile(path.join(f.manager.dataDir,'state.json'),'utf8')).mcpServers[0];assert.equal(persisted.env,undefined);assert.equal(persisted.command,undefined);assert.equal(persisted.bearerToken,undefined);
-  assert.equal((await fs.stat(path.join(f.manager.dataDir,'state.json'))).mode&0o777,0o600);
+  if (process.platform !== 'win32') assert.equal((await fs.stat(path.join(f.manager.dataDir,'state.json'))).mode&0o777,0o600);
   for(const url of ['http://8.8.8.8/mcp','http://169.254.169.254/mcp','http://127.0.0.1/mcp?token=secret'])assert.equal((await f.request('/api/mcp/servers',{method:'POST',auth:f.auth,body:{name:'Bad',url,transport:'http',enabled:true}})).status,400);
   assert.equal((await f.request(`/api/mcp/servers/${connection.id}`,{method:'DELETE',auth:f.auth})).status,200);
   const health=await f.request('/api/health');assert.equal(health.data.version,VERSION);assert.equal(health.data.developedBy,DEVELOPER);

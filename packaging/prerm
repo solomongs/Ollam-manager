@@ -1,0 +1,21 @@
+#!/bin/bash
+set -Eeuo pipefail
+case "${1:-}" in
+  remove|deconfigure)
+    if [[ -L /etc/spark-ollama-manager.env || -L /opt/spark-ollama-manager ]]; then
+      printf '%s\n' 'Managed configuration/code is a symbolic link; refusing removal.' >&2
+      exit 1
+    fi
+    if [[ -f /etc/spark-ollama-manager.env ]] && /bin/grep -q '^SPARK_INSTALLATION_MODE=deb$' /etc/spark-ollama-manager.env; then
+      if [[ ! -f /opt/spark-ollama-manager/uninstall.sh || -L /opt/spark-ollama-manager/uninstall.sh ]]; then
+        printf '%s\n' 'Installed package removal helper is missing; restore/reinstall the package before removal.' >&2
+        exit 1
+      fi
+      /bin/bash /opt/spark-ollama-manager/uninstall.sh
+    else
+      printf '%s\n' 'No active Debian-managed service found; any source installation and its data are preserved.'
+    fi
+    ;;
+  upgrade|failed-upgrade) ;;
+esac
+exit 0

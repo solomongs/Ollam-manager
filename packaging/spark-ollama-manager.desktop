@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Spark Ollama Manager
+Comment=Open your private Ollama and MCP manager, developed by Solomon
+Exec=/usr/bin/spark-ollama-manager-open
+Icon=spark-ollama-manager
+Terminal=false
+Categories=Development;Utility;
+StartupNotify=true

@@ -7,6 +7,7 @@ DATA=/var/lib/spark-ollama-manager
 ENV_FILE=/etc/spark-ollama-manager.env
 UNIT_FILE=/etc/systemd/system/spark-ollama-manager.service
 MARKER=/etc/spark-ollama-manager-tailscale.json
+LAUNCH_FILE=/etc/spark-ollama-manager.url
 SERVICE=spark-ollama-manager.service
 
 if [[ ${1:-} == --help || ${1:-} == -h ]]; then
@@ -15,7 +16,7 @@ if [[ ${1:-} == --help || ${1:-} == -h ]]; then
 fi
 (($# == 0)) || { printf '%s\n' 'Unsupported argument. Removal always preserves state and models.' >&2; exit 1; }
 ((EUID == 0)) || { printf '%s\n' 'Run with sudo.' >&2; exit 1; }
-for path in "$APP" "$DATA" "$ENV_FILE" "$UNIT_FILE" "$MARKER"; do
+for path in "$APP" "$DATA" "$ENV_FILE" "$UNIT_FILE" "$MARKER" "$LAUNCH_FILE"; do
   [[ ! -L $path ]] || { printf 'Refusing managed symbolic link: %s\n' "$path" >&2; exit 1; }
 done
 exec 9>/run/lock/spark-ollama-manager-install.lock
@@ -40,7 +41,7 @@ if [[ -f $MARKER ]]; then
   fi
 fi
 systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
-rm -f -- "$UNIT_FILE" "$ENV_FILE" "$MARKER"
+rm -f -- "$UNIT_FILE" "$ENV_FILE" "$MARKER" "$LAUNCH_FILE"
 systemctl daemon-reload
 systemctl reset-failed "$SERVICE" >/dev/null 2>&1 || true
 if [[ -d $APP ]]; then rm -rf -- "$APP"; fi

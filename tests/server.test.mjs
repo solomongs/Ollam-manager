@@ -118,7 +118,7 @@ test('session authentication, credential permissions, CSRF and origin requiremen
   assert.equal((await f.call('/api/settings',{method:'POST',body:{title:'Test',subtitle:''},origin:'https://evil.example'})).status,403);
   assert.equal((await f.call('/api/settings',{method:'POST',body:{title:'Test',subtitle:''}})).status,200);
   assert.equal((await f.call('/api/settings',{method:'POST',body:{title:'x'.repeat(1100000),subtitle:''}})).status,413);
-  for (const name of ['credentials.json','state.json','first-login.txt']) assert.equal((await fs.stat(path.join(f.manager.dataDir,name))).mode & 0o777,0o600);
+  for (const name of ['credentials.json','state.json','first-login.txt']) { const stat=await fs.stat(path.join(f.manager.dataDir,name)); assert.equal(stat.isFile(),true); if (process.platform !== 'win32') assert.equal(stat.mode & 0o777,0o600); }
   const contents = await fs.readFile(path.join(f.manager.dataDir,'credentials.json'),'utf8');
   assert.equal(contents.includes(password),false);
   assert.equal((await f.call('/api/logout',{method:'POST'})).status,200);

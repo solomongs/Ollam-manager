@@ -14,7 +14,7 @@ import { validateMcpConfig, publicMcpConfig, createMcpClient } from './mcp-clien
 
 const scrypt = promisify(scryptCallback);
 const execFile = promisify(execFileCallback);
-export const VERSION = '1.1.0';
+export const VERSION = '1.2.0';
 export const DEVELOPER = 'Solomon';
 const BASE = path.dirname(fileURLToPath(import.meta.url));
 const MAX_JSON = 1024 * 1024;
@@ -264,17 +264,107 @@ function formatToolResult(result, configuration) {
   return redactMcpSecrets([content,structured].filter(Boolean).join('\n') || 'Tool returned no content.',configuration).slice(0,262144);
 }
 
+const OFFICIAL_REPOSITORY = 'https://github.com/solomongs/Ollam-manager';
+const OFFICIAL_RELEASE_API = 'https://api.github.com/repos/solomongs/Ollam-manager/releases/latest';
+const INSTALLATION_MODES = new Set(['desktop','deb','dgx','service','source','container']);
+function publicReleaseAddress(address) {
+  let ip = address.toLowerCase().split('%')[0];
+  if (net.isIP(ip) === 6) { try { ip = new URL(`http://[${ip}]`).hostname.slice(1,-1); } catch { return false; } }
+  if (net.isIP(ip) === 4) {
+    const [a,b,c] = ip.split('.').map(Number);
+    return !isPrivateAddress(ip) && a !== 0 && a < 224 && !(a === 169 && b === 254) && !(a === 192 && b === 0 && [0,2].includes(c)) && !(a === 198 && (b === 18 || b === 19 || b === 51 && c === 100)) && !(a === 203 && b === 0 && c === 113) && ip !== '168.63.129.16';
+  }
+  return net.isIP(ip) === 6 && /^[23][0-9a-f]{3}:/.test(ip) && !ip.startsWith('2001:db8:') && !ip.startsWith('2002:');
+}
+async function requestOfficialRelease(_fixedUrl,{signal} = {}) {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort(new Error('Release check cancelled.'));
+  if (signal?.aborted) onAbort(); else signal?.addEventListener('abort',onAbort,{once:true});
+  const timer = setTimeout(() => controller.abort(new Error('Release check timed out.')),5000);
+  try {
+    const addresses = await Promise.race([
+      lookup('api.github.com',{all:true}),
+      new Promise((_resolve,rejectPromise) => controller.signal.addEventListener('abort',() => rejectPromise(new Error('Release check timed out.')),{once:true})),
+    ]);
+    if (!addresses.length || addresses.some(item => !publicReleaseAddress(item.address))) throw new Error('Official release host resolved to an unsafe address.');
+    if (controller.signal.aborted) throw new Error('Release check timed out.');
+    const response = await new Promise((resolve,rejectPromise) => {
+      const request = https.request({hostname:'api.github.com',port:443,path:'/repos/solomongs/Ollam-manager/releases/latest',method:'GET',signal:controller.signal,autoSelectFamily:true,headers:{Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':`Spark-Ollama-Manager/${VERSION}`},lookup:(_hostname,opts,callback) => opts.all ? callback(null,addresses) : callback(null,addresses[0].address,addresses[0].family)},resolve);
+      request.on('error',rejectPromise); request.end();
+    });
+    if (response.statusCode === 404) { response.resume(); throw new Error('An official GitHub release has not been published yet.'); }
+    if (response.statusCode >= 300 && response.statusCode <= 399) { response.resume(); throw new Error('Release API redirects are blocked.'); }
+    if (response.statusCode !== 200) { response.resume(); throw new Error(`Official release API returned HTTP ${response.statusCode}.`); }
+    return await boundedJSON(response,512 * 1024);
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort',onAbort); controller.abort(); }
+}
+function releaseVersion(tag) {
+  if (typeof tag !== 'string') return null;
+  const component = '(?:0|[1-9][0-9]{0,5})';
+  const match = tag.match(new RegExp(`^v?(${component}\\.${component}\\.${component})$`));
+  return match ? match[1] : null;
+}
+function newerVersion(left,right) {
+  const a = left.split('.').map(Number), b = right.split('.').map(Number);
+  for (let index = 0; index < 3; index++) if (a[index] !== b[index]) return a[index] > b[index];
+  return false;
+}
+function updateMetadata(installationMode, latest) {
+  const version = latest.status === 'available' ? latest.version : VERSION;
+  const prefix = `${OFFICIAL_REPOSITORY}/releases/download/v${version}`;
+  const windowsX64 = `${prefix}/Spark-Ollama-Manager-${version}-windows-x64-setup.exe`;
+  const windowsArm64 = `${prefix}/Spark-Ollama-Manager-${version}-windows-arm64-setup.exe`;
+  const armDesktop = installationMode === 'desktop' && process.platform === 'win32' && process.arch === 'arm64';
+  let command = '', instructions;
+  if (installationMode === 'desktop') instructions = 'Download the matching Windows installer from the official Releases page, close the manager, and run the new installer. Your settings and conversations stay in your user profile.';
+  else if (installationMode === 'deb') { command = `sudo apt install ./spark-ollama-manager_${version}_arm64.deb`; instructions = 'Download the official DGX ARM64 package, run the command from its download folder, and reopen the manager. The package keeps settings and model files separate from application code.'; }
+  else if (installationMode === 'dgx' || installationMode === 'service') { command = 'node scripts/update.mjs --check\nnode scripts/update.mjs\nsudo bash install.sh'; instructions = 'Run these commands from your clean Git source checkout on the DGX. The updater verifies the official origin and fast-forwards main; the installer deploys the reviewed code and preserves manager data.'; }
+  else if (installationMode === 'container') instructions = 'Pull the newer official image from ghcr.io/solomongs/ollam-manager (or rebuild the source), then recreate the container with its existing deployment configuration and the same persistent data volume.';
+  else { command = 'node scripts/update.mjs --check\nnode scripts/update.mjs'; instructions = 'Run these commands in your clean official Git source checkout. Stop active chats and downloads, then restart the manager after updating. For a source ZIP installation, download and extract the new source separately while retaining your data folder.'; }
+  return {installedVersion:VERSION,platform:process.platform,arch:process.arch,installationMode,repositoryUrl:OFFICIAL_REPOSITORY,sourceUrl:`${OFFICIAL_REPOSITORY}/archive/refs/heads/main.zip`,releasesUrl:`${OFFICIAL_REPOSITORY}/releases`,releaseApiUrl:OFFICIAL_RELEASE_API,
+    packages:{windows:{url:armDesktop ? windowsArm64 : windowsX64,label:armDesktop ? 'Windows installer (ARM64)' : 'Windows installer (x64)',x64Url:windowsX64,x64Label:'Windows installer (x64)',arm64Url:windowsArm64,arm64Label:'Windows installer (ARM64)'},dgx:{url:`${prefix}/spark-ollama-manager_${version}_arm64.deb`,label:'DGX Spark package (ARM64)'},source:{url:`${OFFICIAL_REPOSITORY}/archive/refs/tags/v${version}.zip`,label:`Source archive (${version})`}},
+    update:{command,gitCommand:'git pull --ff-only',instructions},latest};
+}
+
 export async function createManager(options = {}) {
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(BASE, 'data'));
   const publicDir = path.resolve(options.publicDir || path.join(BASE, 'public'));
   const host = options.host || process.env.HOST || '127.0.0.1';
   const port = options.port ?? Number(process.env.PORT || 42010);
-  const originSetting = options.publicOrigin || process.env.PUBLIC_ORIGIN;
+  const originSetting = Object.hasOwn(options,'publicOrigin') && options.publicOrigin !== undefined ? options.publicOrigin : process.env.PUBLIC_ORIGIN;
   let publicOrigin;
   if (originSetting) {
     const parsed = new URL(originSetting);
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== originSetting.replace(/\/$/, '') || parsed.username || parsed.password) throw new Error('PUBLIC_ORIGIN must be one exact http(s) origin.');
     publicOrigin = parsed.origin;
+  }
+  const installationMode = options.installationMode || process.env.SPARK_INSTALLATION_MODE || 'source';
+  if (!INSTALLATION_MODES.has(installationMode)) throw new Error('SPARK_INSTALLATION_MODE is invalid.');
+  let latestRelease = {status:'not-checked'}, releaseCheckPromise;
+  const releaseFetcher = options.releaseFetcher || requestOfficialRelease;
+  const releaseTimeout = options.releaseCheckTimeoutMs ?? 5000;
+  if (typeof releaseFetcher !== 'function' || !Number.isInteger(releaseTimeout) || releaseTimeout < 50 || releaseTimeout > 30000) throw new Error('Release-check options are invalid.');
+  async function checkRelease() {
+    if (latestRelease.checkedAt && Date.now() - Date.parse(latestRelease.checkedAt) < 5 * 60 * 1000) return latestRelease;
+    if (releaseCheckPromise) return releaseCheckPromise;
+    releaseCheckPromise = (async () => {
+      const checkedAt = new Date().toISOString(), controller = new AbortController();
+      controllers.set('update-check',controller);
+      let timer;
+      try {
+        const stopped = new Promise((_resolve,rejectPromise) => {
+          controller.signal.addEventListener('abort',() => rejectPromise(new Error('Release check timed out or was cancelled.')),{once:true});
+          timer = setTimeout(() => controller.abort(),releaseTimeout);
+        });
+        const release = await Promise.race([releaseFetcher(OFFICIAL_RELEASE_API,{signal:controller.signal}),stopped]);
+        const version = releaseVersion(release?.tag_name);
+        if (!version || release.draft || release.prerelease) throw new Error('Official release metadata did not contain a stable version.');
+        latestRelease = {status:newerVersion(version,VERSION) ? 'available' : 'current',version,checkedAt};
+      } catch (error) { latestRelease = {status:'unavailable',checkedAt,error:String(error.message || 'Official releases could not be checked.').slice(0,512)}; }
+      finally { clearTimeout(timer); controller.abort(); controllers.delete('update-check'); }
+      return latestRelease;
+    })().finally(() => { releaseCheckPromise = null; });
+    return releaseCheckPromise;
   }
   const suppliedRoots = options.importRoots || (process.env.IMPORT_ROOTS || path.join(os.homedir(), 'Models')).split(path.delimiter);
   const importRoots = [];
@@ -297,9 +387,10 @@ export async function createManager(options = {}) {
   const stateFile = path.join(dataDir, 'state.json');
   const defaultUrl = options.ollamaUrl || process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
   await validateTarget(defaultUrl);
+  const initialServerName = string(options.initialServerName || (installationMode === 'desktop' ? 'Local Ollama' : 'DGX Spark'),'Initial server name',80);
   const state = await loadJSON(stateFile, {
     version:1,settings:{title:'Spark Ollama Manager',subtitle:'Your private AI workspace'},
-    servers:[{id:'local',name:'DGX Spark',url:new URL(defaultUrl).origin}],activeServerId:'local',jobs:[],chats:{},mcpServers:[],
+    servers:[{id:'local',name:initialServerName,url:new URL(defaultUrl).origin}],activeServerId:'local',jobs:[],chats:{},mcpServers:[],
   });
   if (!state.settings || !Array.isArray(state.servers) || !Array.isArray(state.jobs) || !state.chats || typeof state.chats !== 'object') throw new Error('Saved state has an invalid structure.');
   state.mcpServers ??= [];
@@ -804,6 +895,13 @@ export async function createManager(options = {}) {
         return sendJSON(res,200,{ok:true});
       }
       if (method === 'GET' && pathname === '/api/state') return sendJSON(res,200,{settings:state.settings,servers:state.servers,activeServerId:state.activeServerId,mcpServers:state.mcpServers.map(publicMcpConfig),jobs:state.jobs.map(publicJob).reverse(),chats:Object.values(state.chats).map(({id,title,serverId,model,updatedAt}) => ({id,title,serverId,model,updatedAt})).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt))});
+      if (method === 'GET' && pathname === '/api/updates') {
+        for (const key of url.searchParams.keys()) if (key !== 'check') reject(400,'Unsupported update query parameter.');
+        const check = url.searchParams.get('check');
+        if (url.searchParams.getAll('check').length > 1 || (check !== null && check !== '1')) reject(400,'Use check=1 to check official releases.');
+        if (check === '1') await checkRelease();
+        return sendJSON(res,200,updateMetadata(installationMode,latestRelease));
+      }
       if (method === 'GET' && pathname === '/api/mcp/servers') return sendJSON(res,200,state.mcpServers.map(publicMcpConfig));
       if (method === 'POST' && pathname === '/api/mcp/servers') {
         const input = await parseBody(req);

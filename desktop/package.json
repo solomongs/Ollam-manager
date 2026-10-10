@@ -1,0 +1,58 @@
+{
+  "name": "spark-ollama-manager-desktop",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "productName": "Spark Ollama Manager",
+  "description": "Private Ollama and MCP desktop manager, developed by Solomon",
+  "author": "Solomon",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.mjs",
+    "build": "electron-builder --publish never",
+    "build:windows": "electron-builder --win nsis --x64 --arm64 --publish never",
+    "smoke": "node smoke-packaged.mjs"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.solomon.sparkollamamanager",
+    "productName": "Spark Ollama Manager",
+    "asar": true,
+    "directories": { "output": "dist", "buildResources": "build" },
+    "files": ["main.mjs", "security.mjs", "runtime.mjs", "package.json"],
+    "extraResources": [{
+      "from": "..",
+      "to": "app",
+      "filter": ["server.mjs", "mcp-client.mjs", "package.json", "LICENSE", "public/**", "scripts/password.mjs"]
+    }],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64", "arm64"] }],
+      "icon": "build/icon.ico",
+      "executableName": "Spark Ollama Manager",
+      "requestedExecutionLevel": "asInvoker",
+      "signAndEditExecutable": true,
+      "signExecutable": false
+    },
+    "nsis": {
+      "artifactName": "Spark-Ollama-Manager-${version}-windows-${arch}-setup.${ext}",
+      "buildUniversalInstaller": false,
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Spark Ollama Manager",
+      "runAfterFinish": false,
+      "include": "build/installer.nsh",
+      "license": "../LICENSE"
+    }
+  }
+}

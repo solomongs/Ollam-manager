@@ -4,7 +4,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { lookup } from 'node:dns/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 
 export const MCP_PROTOCOL_VERSIONS = Object.freeze(['2025-11-25','2025-06-18','2025-03-26','2024-11-05']);
 const MAX_RESPONSE = 2 * 1024 * 1024;
@@ -64,6 +64,20 @@ export async function validateMcpTarget(value) {
   if (url.protocol === 'http:' && addresses.some(item => addressType(item.address) !== 'private')) fail('Public MCP servers require HTTPS. HTTP is limited to private and loopback addresses.');
   return {url,addresses};
 }
+export function validateMcpExecutable(command,commandStats,cwdStats,platform=process.platform) {
+  const paths = platform === 'win32' ? path.win32 : path.posix;
+  if (!paths.isAbsolute(command)) fail('MCP executable must be an absolute path.');
+  if (!commandStats.isFile() || !cwdStats.isDirectory()) fail('MCP executable must be a regular file and cwd must be a directory.');
+  if (platform === 'win32') {
+    if (paths.extname(command).toLowerCase() !== '.exe') fail('Windows MCP commands must be .exe executables. Pass script files as arguments to Node or Python; batch and shell scripts are not executed directly.');
+  } else if (!(commandStats.mode & 0o111)) fail('MCP executable must have execute permission.');
+}
+export function windowsProcessTreeCommand(pid,systemRoot=process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows') {
+  if (!Number.isSafeInteger(pid) || pid <= 0) fail('MCP child process ID is invalid.');
+  if (typeof systemRoot !== 'string' || !/^[a-zA-Z]:[\\/]/.test(systemRoot) || systemRoot.includes('\0')) fail('Windows system directory is invalid.');
+  return {command:path.win32.join(systemRoot,'System32','taskkill.exe'),args:['/PID',String(pid),'/T','/F']};
+}
+
 export async function validateMcpConfig(input,existing) {
   if (!record(input)) fail('MCP configuration must be an object.');
   const allowed = new Set(['id','name','transport','enabled','url','bearerToken','command','args','env','cwd']);
@@ -98,7 +112,7 @@ export async function validateMcpConfig(input,existing) {
     }
     result.env=env;
     const [commandStats,cwdStats] = await Promise.all([fs.stat(result.command),fs.stat(result.cwd)]).catch(() => fail('MCP executable or working directory is unavailable.'));
-    if (!commandStats.isFile() || !(commandStats.mode & 0o111) || !cwdStats.isDirectory()) fail('MCP executable must be executable and cwd must be a directory.');
+    validateMcpExecutable(result.command,commandStats,cwdStats);
   }
   checkedJSON(result);
   return result;
@@ -122,13 +136,27 @@ export function createMcpClient(input,options={}) {
   const timeout=options.timeout ?? 15000;
   if (!Number.isInteger(timeout) || timeout < 50 || timeout > 120000) fail('MCP timeout must be between 50 and 120000 ms.');
   let config, configPromise, initialized, initializationPromise, protocolVersion, sessionId, nextId=1;
-  let child, closed=false, closePromise, stdoutBuffer='', stdoutBytes=0, processReleased=false;
+  let child, closed=false, closePromise, windowsKillPromise, stdoutBuffer='', stdoutBytes=0, processReleased=false;
   const active=new Map(), stdioPending=new Map(), background=new Set();
   function track(promise) { background.add(promise); promise.finally(() => background.delete(promise)).catch(() => {}); return promise; }
   async function ready() { if (closed) fail('MCP client is closed.'); if (!configPromise) configPromise=validateMcpConfig(snapshot).then(value => config=value); const value=await configPromise; if (closed || options.signal?.aborted) fail('MCP client is closed.'); return value; }
   function releaseProcess() { if (child && !processReleased) { processReleased=true; processCount--; } }
   function rejectStdio(error) { for (const waiter of stdioPending.values()) waiter.reject(error); stdioPending.clear(); }
-  function kill(signal) { if (!child?.pid) return; try { process.kill(process.platform === 'win32' ? child.pid : -child.pid,signal); } catch {} }
+  function kill(signal) {
+    if (!child?.pid) return Promise.resolve();
+    if (process.platform !== 'win32') { try { process.kill(-child.pid,signal); } catch {} return Promise.resolve(); }
+    if (windowsKillPromise) return windowsKillPromise;
+    if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+    let invocation;
+    try { invocation = windowsProcessTreeCommand(child.pid); } catch { try { child.kill(signal); } catch {} return Promise.resolve(); }
+    windowsKillPromise = new Promise(resolve => {
+      execFile(invocation.command,invocation.args,{shell:false,windowsHide:true,timeout:1000,maxBuffer:65536},error => {
+        if (error && child.exitCode === null && child.signalCode === null) { try { child.kill(signal); } catch {} }
+        resolve();
+      });
+    });
+    return windowsKillPromise;
+  }
   function stdioWrite(message) {
     if (!child || child.stdin.destroyed) return Promise.reject(new Error('MCP process is unavailable.'));
     return new Promise((resolve,reject) => child.stdin.write(checkedJSON(message)+'\n',error => error ? reject(error) : resolve()));
@@ -148,7 +176,7 @@ export function createMcpClient(input,options={}) {
     if (typeof process.getuid === 'function' && process.getuid() === 0 && (!Number.isInteger(options.stdioUid) || options.stdioUid <= 0)) fail('Stdio MCP servers must run under the nonroot service account.');
     if (options.stdioUid !== undefined && (!Number.isInteger(options.stdioUid) || options.stdioUid <= 0)) fail('Invalid internal MCP subprocess UID.');
     const env={PATH:process.env.PATH || '/usr/local/bin:/usr/bin:/bin'};
-    for (const key of ['HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR','XDG_RUNTIME_DIR']) if (process.env[key]) env[key]=process.env[key];
+    for (const key of ['HOME','USER','LOGNAME','LANG','LC_ALL','TMPDIR','XDG_RUNTIME_DIR',...(process.platform === 'win32' ? ['SystemRoot','WINDIR','USERPROFILE','APPDATA','LOCALAPPDATA','TEMP','TMP'] : [])]) if (process.env[key]) env[key]=process.env[key];
     Object.assign(env,config.env);
     child=spawn(config.command,config.args,{cwd:config.cwd,env,shell:false,stdio:['pipe','pipe','pipe'],detached:process.platform !== 'win32',...(options.stdioUid !== undefined ? {uid:options.stdioUid,gid:options.stdioGid ?? options.stdioUid} : {})});
     processCount++;
@@ -296,7 +324,7 @@ export function createMcpClient(input,options={}) {
     if (initialized) return initialized;
     if (initializationPromise) return initializationPromise;
     initializationPromise=(async () => {
-      const result=await request('initialize',{protocolVersion:MCP_PROTOCOL_VERSIONS[0],capabilities:{},clientInfo:{name:'spark-ollama-manager',version:'1.1.0'}});
+      const result=await request('initialize',{protocolVersion:MCP_PROTOCOL_VERSIONS[0],capabilities:{},clientInfo:{name:'spark-ollama-manager',version:'1.2.0'}});
       if (!record(result) || !MCP_PROTOCOL_VERSIONS.includes(result.protocolVersion) || !record(result.capabilities) || !record(result.serverInfo)) fail('MCP initialization returned an unsupported protocol or invalid capabilities.');
       protocolVersion=result.protocolVersion;
       await notify('notifications/initialized');
@@ -341,7 +369,9 @@ export function createMcpClient(input,options={}) {
       if (config?.transport === 'http' && sessionId) await httpExchange(undefined,{method:'DELETE',limitTimeout:1500}).catch(() => {});
       sessionId=undefined;
       if (child) {
-        child.stdin.end();
+        // Windows has no process groups: terminate the tree while its parent PID still exists.
+        if (process.platform === 'win32') await kill('SIGKILL');
+        if (!child.stdin.destroyed) child.stdin.end();
         if (child.exitCode === null && child.signalCode === null) {
           await new Promise(resolve => {
             const terminate=setTimeout(() => kill('SIGTERM'),250);
@@ -349,7 +379,7 @@ export function createMcpClient(input,options={}) {
             child.once('exit',() => { clearTimeout(terminate); clearTimeout(force); resolve(); });
           });
         }
-        kill('SIGKILL'); child.stdout.destroy(); child.stderr.destroy(); releaseProcess();
+        await kill('SIGKILL'); child.stdout.destroy(); child.stderr.destroy(); releaseProcess();
       }
     })();
     return closePromise;

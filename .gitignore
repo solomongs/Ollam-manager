@@ -11,3 +11,7 @@
 *.log
 *.tmp
 .DS_Store
+/desktop/node_modules/
+/desktop/dist/
+/dist/
+/packaging/.cache/
