@@ -51,9 +51,9 @@ jobs:
       - name: Nonroot container startup and login
         run: |
           docker build -t spark-manager:ci .
-          trap 'docker rm -f -v spark-manager-ci >/dev/null 2>&1 || true' EXIT
+          trap 'spark_smoke_status=$?; if ((spark_smoke_status)); then docker logs spark-manager-ci || true; fi; docker rm -f -v spark-manager-ci >/dev/null 2>&1 || true; exit "$spark_smoke_status"' EXIT
           docker run -d --name spark-manager-ci --read-only --tmpfs /tmp --add-host host.docker.internal:host-gateway -p 127.0.0.1:42010:42010 spark-manager:ci
-          curl --fail --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:42010/api/health > /tmp/container-health.json
+          curl --fail --max-time 3 --retry 10 --retry-delay 1 --retry-all-errors --retry-connrefused http://127.0.0.1:42010/api/health > /tmp/container-health.json
           docker exec spark-manager-ci sh -c 'test "$(id -u)" = 10001 && test -s /data/first-login.txt'
           docker exec spark-manager-ci node -e "const fs=require('fs');fetch('http://127.0.0.1:42010/api/login',{method:'POST',headers:{'Content-Type':'application/json','Origin':'http://127.0.0.1:42010'},body:JSON.stringify({password:fs.readFileSync('/data/first-login.txt','utf8').trim()})}).then(async r=>{if(!r.ok)throw new Error(await r.text())}).catch(e=>{console.error(e);process.exit(1)})"
       - name: Browser workflows and responsive UI

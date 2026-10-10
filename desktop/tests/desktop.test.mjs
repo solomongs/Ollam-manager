@@ -32,6 +32,12 @@ test('session and window deny navigation, popups, permissions and remote request
   configureSession(session, 'http://127.0.0.1:5');
   handlers.permission(null, 'camera', value => assert.equal(value, false));
   assert.equal(handlers.check(), false);
+  const trusted = {isDestroyed:() => false, isFocused:() => true, getURL:() => 'http://127.0.0.1:5/#settings'};
+  const details = {isMainFrame:true, requestingUrl:'http://127.0.0.1:5/'};
+  assert.equal(handlers.check(trusted, 'clipboard-sanitized-write', 'http://127.0.0.1:5', details), true);
+  assert.equal(handlers.check(trusted, 'clipboard-read', 'http://127.0.0.1:5', details), false);
+  assert.equal(handlers.check(trusted, 'clipboard-sanitized-write', 'https://evil.com', {...details, requestingUrl:'https://evil.com'}), false);
+  assert.equal(handlers.check(trusted, 'clipboard-sanitized-write', 'http://127.0.0.1:5', {...details, isMainFrame:false}), false);
   handlers.request({url:'https://example.com/', resourceType:'script'}, value => assert.equal(value.cancel, true));
   assert.equal(WEB_PREFERENCES.nodeIntegration, false);
   assert.equal(WEB_PREFERENCES.contextIsolation, true);
