@@ -8,10 +8,10 @@ The release CI targets Windows 11 x64 and ARM64. Use the matching assets on the 
 
 | Windows architecture | Installer |
 |---|---|
-| Intel/AMD x64 | `Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe` |
-| Windows ARM64 | `Spark-Ollama-Manager-1.2.0-windows-arm64-setup.exe` |
+| Intel/AMD x64 | [Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe) |
+| Windows ARM64 | [Spark-Ollama-Manager-1.2.0-windows-arm64-setup.exe](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-arm64-setup.exe) |
 
-Check **Settings → System → About → System type** to choose the architecture. Download the matching installer and the release's `SHA256SUMS`. For example, in PowerShell from the download folder:
+Check **Settings → System → About → System type** to choose the architecture. Download the matching installer and the release's [SHA256SUMS](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/SHA256SUMS). For example, in PowerShell from the download folder:
 
 ```powershell
 Get-FileHash .\Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe -Algorithm SHA256
@@ -21,7 +21,7 @@ Compare the printed hash with that filename's entry in `SHA256SUMS`. Run the ins
 
 Windows binaries are unsigned: a publisher certificate has not been configured. Windows may show an unknown-publisher/reputation warning or block execution according to its security policy. Download from this repository and verify the release hash; do not disable Windows security controls to bypass a block. See [Microsoft's explanation of SmartScreen reputation](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation).
 
-Release files appear only after the corresponding build/publication succeeds. Packaging definitions or CI build output do not establish that an installation has been exercised on your Windows hardware. [VERIFICATION.md](../VERIFICATION.md) records the actual checks.
+Both v1.2.0 installers are published after native installation and two-launch smoke checks passed on matching x64/ARM64 runners. Those results establish the checked CI behavior; installation and inference on your own computer still need checking. [VERIFICATION.md](../VERIFICATION.md) records the actual jobs.
 
 ## First launch and Ollama
 

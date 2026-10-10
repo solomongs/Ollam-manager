@@ -14,15 +14,15 @@ This is an independently implemented manager, informed by a study of the supplie
 
 | Platform / workflow | Distribution | Guide |
 |---|---|---|
-| Windows desktop | Windows `.exe` installer from GitHub Releases | [Windows setup](docs/WINDOWS.md) |
-| DGX Spark, DGX OS / Ubuntu ARM64 | ARM64 `.deb` installer from GitHub Releases | [DGX package setup](docs/DGX-PACKAGE.md) |
+| Windows desktop | Download `.exe`: [x64](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-x64-setup.exe) / [ARM64](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-windows-arm64-setup.exe) | [Windows setup](docs/WINDOWS.md) |
+| DGX Spark, DGX OS / Ubuntu ARM64 | Download [ARM64 `.deb`](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/spark-ollama-manager_1.2.0_arm64.deb) | [DGX package setup](docs/DGX-PACKAGE.md) |
 | Browser backend on Windows / Linux / macOS | Git source checkout with Node.js 22+ | [Run from source](#run-from-source-on-windows-linux-or-macos) |
 | DGX source deployment | Source folder plus `install.sh` | [Source install below](#install-on-the-dgx) |
 | Linux container | Multi-architecture image in GitHub Packages / GHCR | [Container setup](docs/CONTAINER.md) |
 
-The project repository is [solomongs/Ollam-manager](https://github.com/solomongs/Ollam-manager). Desktop installers are downloadable assets on [GitHub Releases](https://github.com/solomongs/Ollam-manager/releases/latest); the container belongs on the repository's [Packages page](https://github.com/solomongs/Ollam-manager/pkgs/container/ollam-manager). GitHub Packages is a container registry in this distribution, while Releases stores the `.exe` and `.deb` downloads. See [release publishing](docs/RELEASING.md) for the build/publishing process and required package visibility.
+The project repository is [solomongs/Ollam-manager](https://github.com/solomongs/Ollam-manager). **Release v1.2.0 is published** with both Windows installers, the DGX package, a [source ZIP](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/Spark-Ollama-Manager-1.2.0-source.zip) and [SHA256SUMS](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/SHA256SUMS). The Linux AMD64/ARM64 container is also published on the repository's [Packages page](https://github.com/solomongs/Ollam-manager/pkgs/container/ollam-manager) as `ghcr.io/solomongs/ollam-manager:1.2.0` and `:latest`; it is Public and anonymous pulling was verified. GitHub Packages hosts the container, while Releases stores the `.exe` and `.deb` downloads. See [release publishing](docs/RELEASING.md) for the process and package visibility.
 
-This source tree supplies packaging and release automation. A release asset is available only after its build and publication succeeds; a checked-in installer definition is not proof of a built or tested Windows executable. See [VERIFICATION.md](VERIFICATION.md) for release evidence and pending hardware checks.
+Native x64/ARM64 Windows installer smoke checks and ARM64 Ubuntu package lifecycle checks passed before publication. See [VERIFICATION.md](VERIFICATION.md) for the job evidence and the remaining checks on the user's physical DGX, GPU inference and private access URL. Windows installers are unsigned.
 
 ## Included workflows
 

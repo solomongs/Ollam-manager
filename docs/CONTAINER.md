@@ -4,7 +4,9 @@ Spark Ollama Manager 1.2.0. Developed by Solomon. The container runs the manager
 
 ## Image and persistent state
 
-The release workflow publishes `ghcr.io/solomongs/ollam-manager:1.2.0` and `:latest` for Linux AMD64 and ARM64, after the release prerequisites pass. See the project's [Packages page](https://github.com/solomongs/Ollam-manager/pkgs/container/ollam-manager). An image is downloadable only after publication succeeds. The package owner must set its visibility to **Public** for anonymous pulls; see the [publishing guide](RELEASING.md). This guide's version tag is deliberate so an upgrade is explicit.
+`ghcr.io/solomongs/ollam-manager:1.2.0` and `:latest` are published for Linux AMD64 and ARM64 on the project's [Packages page](https://github.com/solomongs/Ollam-manager/pkgs/container/ollam-manager). On 10 October 2026 the package was confirmed **Public**, and an anonymous pull succeeded after registry login credentials were removed. No GitHub login is needed to pull this release. This guide uses the version tag deliberately so upgrades are explicit.
+
+The published multi-architecture manifest digest is `sha256:410c164cf340f0d0db473ce4660687ee59fdf0ea4bd56bc94e65dd24b2fed2c1`. See [VERIFICATION.md](../VERIFICATION.md) for the publication job and runtime evidence, and the [publishing guide](RELEASING.md) for future releases.
 
 The image runs as nonroot UID/GID `10001`, keeps all persistent manager state under `/data`, and listens on container port `42010`. Use a named volume so password hashes, conversations, jobs, MCP settings and imports survive container replacement. A new empty named volume inherits the image's prepared `/data` ownership. A pre-existing bind mount must separately grant UID/GID `10001` appropriate access; do not mount your Ollama model directory as manager state.
 

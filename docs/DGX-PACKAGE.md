@@ -4,7 +4,7 @@ Spark Ollama Manager 1.2.0. Developed by Solomon. Target: NVIDIA DGX Spark runni
 
 ## Install the release package
 
-Download `spark-ollama-manager_1.2.0_arm64.deb` and `SHA256SUMS` from [GitHub Releases](https://github.com/solomongs/Ollam-manager/releases/latest). On the DGX, verify the package hash against its release entry:
+Download [spark-ollama-manager_1.2.0_arm64.deb](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/spark-ollama-manager_1.2.0_arm64.deb) and [SHA256SUMS](https://github.com/solomongs/Ollam-manager/releases/download/v1.2.0/SHA256SUMS) from [Release v1.2.0](https://github.com/solomongs/Ollam-manager/releases/tag/v1.2.0). On the DGX, verify the package hash against its release entry:
 
 ```bash
 sha256sum spark-ollama-manager_1.2.0_arm64.deb

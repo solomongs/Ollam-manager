@@ -2,6 +2,8 @@
 
 The fixed project is [solomongs/Ollam-manager](https://github.com/solomongs/Ollam-manager). Developed by Solomon. The workflow definition is `.github/workflows/release.yml`.
 
+**Version 1.2.0 is published:** [Release v1.2.0](https://github.com/solomongs/Ollam-manager/releases/tag/v1.2.0) contains both Windows installers, the DGX package, source ZIP and checksums. The [GHCR package](https://github.com/solomongs/Ollam-manager/pkgs/container/ollam-manager) is Public with version/latest tags for Linux AMD64 and ARM64. Anonymous image pulling and release checksum access were verified on 10 October 2026. See [VERIFICATION.md](../VERIFICATION.md) for the completed CI jobs.
+
 ## Where downloads appear
 
 | Distribution | Destination |
@@ -35,7 +37,7 @@ The workflow uses the repository-scoped `GITHUB_TOKEN`, with `contents:write` on
 
 ## Make the container available to everyone
 
-A newly published GHCR package can initially be private. After first publication, the repository/package owner must open the package's settings and change its visibility to **Public** if it is to be anonymously downloadable. The workflow checks an anonymous pull and reports whether this step remains necessary; it does not bypass the owner's package visibility controls.
+For **v1.2.0**, the package is already Public and the workflow's anonymous pull succeeded; no manual visibility change is needed. For a future new package that initially appears private, the repository/package owner must change its package visibility to **Public** if it is to be anonymously downloadable. The workflow checks an anonymous pull and reports whether that step remains necessary; it does not bypass the owner's package visibility controls.
 
 After changing visibility, confirm an unauthenticated pull from a clean environment:
 
