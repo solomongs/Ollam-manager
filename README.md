@@ -2,6 +2,8 @@
 
 **Developed by Solomon. Version 1.2.0.**
 
+[Release v1.2.0](https://github.com/solomongs/Ollam-manager/releases/tag/v1.2.0) · [All releases](https://github.com/solomongs/Ollam-manager/releases)
+
 No paid licence, subscription or activation key is required to run this application.
 
 A private Ollama and MCP manager with a browser interface, a Windows desktop wrapper, and an ARM64 installer for NVIDIA DGX Spark. The DGX service uses Node.js built-ins and starts through systemd; it needs no desktop session. The standalone backend needs Node.js 22 or newer, while release installers supply their own application runtime. Existing Ollama installations and model storage remain separate from the manager.
@@ -14,6 +16,7 @@ This is an independently implemented manager, informed by a study of the supplie
 |---|---|---|
 | Windows desktop | Windows `.exe` installer from GitHub Releases | [Windows setup](docs/WINDOWS.md) |
 | DGX Spark, DGX OS / Ubuntu ARM64 | ARM64 `.deb` installer from GitHub Releases | [DGX package setup](docs/DGX-PACKAGE.md) |
+| Browser backend on Windows / Linux / macOS | Git source checkout with Node.js 22+ | [Run from source](#run-from-source-on-windows-linux-or-macos) |
 | DGX source deployment | Source folder plus `install.sh` | [Source install below](#install-on-the-dgx) |
 | Linux container | Multi-architecture image in GitHub Packages / GHCR | [Container setup](docs/CONTAINER.md) |
 
@@ -35,6 +38,28 @@ This source tree supplies packaging and release automation. A release asset is a
 - Version/update information with fixed GitHub links and a guarded Git source updater.
 
 The manager has one administrator password. Custom assistant instructions and model bookmarks use browser-local storage; conversations, jobs, Ollama/MCP connections, and branding are saved on the manager host. It does not provide OllaMan's online catalog scraper, Hugging Face search, built-in autonomous filesystem/shell agent, registry push or commercial license activation. Private Ollama endpoints use unauthenticated Ollama HTTP APIs; Basic/Bearer authenticated Ollama proxy endpoints are outside this version's scope. MCP HTTP connections separately support an optional bearer token. The PWA caches the interface shell; inference and management actions require a connection to the running manager.
+
+## Run from source on Windows, Linux or macOS
+
+With **Node.js 22+** and **Git** installed, run these commands in PowerShell or a terminal:
+
+```bash
+git clone https://github.com/solomongs/Ollam-manager.git
+cd Ollam-manager
+node server.mjs
+```
+
+No npm dependency installation is needed for this browser backend. Keep the terminal running and open `http://127.0.0.1:42010` on that computer. The console prints the protected first-login password file path; read `data/first-login.txt` with `Get-Content .\data\first-login.txt` in PowerShell or `cat data/first-login.txt` on Linux/macOS, then sign in. Ollama runs separately, at the default `http://127.0.0.1:11434` or an existing private endpoint added in Settings. The interface opens even when Ollama is offline.
+
+Stop the source app with Ctrl+C. Chats, credentials and jobs remain in `data`; stopping the backend interrupts active work. Update a clean Git checkout with `node scripts/update.mjs --check`, then `node scripts/update.mjs`, and restart it. The updater verifies the fixed project origin and allows fast-forward updates only. See [updates below](#operations-updates-and-removal).
+
+The ARM64/systemd `install.sh` is specifically for a DGX service installation; it is not required for this generic source workflow. It intentionally rejects Windows, macOS and x86 Linux. A Windows desktop installation uses the `.exe` guide instead of this terminal-hosted workflow.
+
+## Phone and tablet access
+
+Open the running manager's private HTTPS URL in your phone/tablet browser. With the DGX Tailscale setup below, the device must be connected to your permitted tailnet; `127.0.0.1` on a phone refers to the phone, so use the DGX's actual printed URL. Sign in with the manager password and use the responsive interface.
+
+Use the browser's **Add to Home Screen** or **Install app** action when available to open the manager as a PWA. Remote PWA installation needs a secure HTTPS origin. Its cached shell can open offline, but model operations, chat and MCP tools require the manager/Ollama connection. A Windows desktop wrapper is local to that computer; installing it alone does not create a phone-accessible URL.
 
 ## MCP tools in chat
 
@@ -255,7 +280,7 @@ node scripts/update.mjs --check
 node scripts/update.mjs
 ```
 
-The updater is restricted to this project's GitHub origin and `main` branch, requires a clean working tree, and accepts a fast-forward update only. It does not discard local changes or activate a newly fetched DGX service automatically. After reviewing the update, run `sudo bash install.sh` on the DGX to activate it. A ZIP extraction or installed `.deb` is not a Git checkout; use the next release package or source archive instead. Never run Git updates inside `/opt/spark-ollama-manager`. Windows release installations update by installing a newer `.exe`; `.deb` installations update with the newer `.deb`; container installations pull and recreate the image while keeping the state volume. See the platform guides for exact commands.
+The updater requires Node.js 22+ and Git, is restricted to this project's origin and `main` branch, requires a clean working tree, and accepts a fast-forward update only. It refuses to overwrite ignored local files, discard changes or activate a newly fetched DGX service automatically. These commands also work from a source checkout in Windows PowerShell with Node/Git available. After reviewing the update, restart a source app; on the DGX run `sudo bash install.sh` to activate the service code. A ZIP extraction or installed `.deb` is not a Git checkout; use the next release package or source archive instead. Never run Git updates inside `/opt/spark-ollama-manager`. Windows release installations update by installing a newer `.exe`; `.deb` installations update with the newer `.deb`; container installations pull and recreate the image while keeping the state volume. See the platform guides for exact commands.
 
 To stop/remove the manager while preserving state and all Ollama models:
 
@@ -270,7 +295,7 @@ Removal disables the manager service, removes its installed code/configuration a
 The backend/unit checks need Node >=22 and no third-party npm dependencies. Native desktop and package builds use the additional tooling in their platform guides:
 
 ```bash
-node --test tests/*.test.mjs deploy/*.test.mjs
+npm test
 bash -n install.sh uninstall.sh
 ```
 

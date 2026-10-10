@@ -315,15 +315,16 @@ function updateMetadata(installationMode, latest) {
   const windowsX64 = `${prefix}/Spark-Ollama-Manager-${version}-windows-x64-setup.exe`;
   const windowsArm64 = `${prefix}/Spark-Ollama-Manager-${version}-windows-arm64-setup.exe`;
   const armDesktop = installationMode === 'desktop' && process.platform === 'win32' && process.arch === 'arm64';
+  const sourceUpdateCommand = 'node scripts/update.mjs --check\nnode scripts/update.mjs';
   let command = '', instructions;
   if (installationMode === 'desktop') instructions = 'Download the matching Windows installer from the official Releases page, close the manager, and run the new installer. Your settings and conversations stay in your user profile.';
   else if (installationMode === 'deb') { command = `sudo apt install ./spark-ollama-manager_${version}_arm64.deb`; instructions = 'Download the official DGX ARM64 package, run the command from its download folder, and reopen the manager. The package keeps settings and model files separate from application code.'; }
-  else if (installationMode === 'dgx' || installationMode === 'service') { command = 'node scripts/update.mjs --check\nnode scripts/update.mjs\nsudo bash install.sh'; instructions = 'Run these commands from your clean Git source checkout on the DGX. The updater verifies the official origin and fast-forwards main; the installer deploys the reviewed code and preserves manager data.'; }
+  else if (installationMode === 'dgx' || installationMode === 'service') { command = `${sourceUpdateCommand}\nsudo bash install.sh`; instructions = 'Run these commands from your clean Git source checkout on the DGX. The updater verifies the official origin and fast-forwards main; the installer deploys the reviewed code and preserves manager data.'; }
   else if (installationMode === 'container') instructions = 'Pull the newer official image from ghcr.io/solomongs/ollam-manager (or rebuild the source), then recreate the container with its existing deployment configuration and the same persistent data volume.';
-  else { command = 'node scripts/update.mjs --check\nnode scripts/update.mjs'; instructions = 'Run these commands in your clean official Git source checkout. Stop active chats and downloads, then restart the manager after updating. For a source ZIP installation, download and extract the new source separately while retaining your data folder.'; }
+  else { command = sourceUpdateCommand; instructions = 'Run these commands in your clean official Git source checkout. Stop active chats and downloads, then restart the manager after updating. For a source ZIP installation, download and extract the new source separately while retaining your data folder.'; }
   return {installedVersion:VERSION,platform:process.platform,arch:process.arch,installationMode,repositoryUrl:OFFICIAL_REPOSITORY,sourceUrl:`${OFFICIAL_REPOSITORY}/archive/refs/heads/main.zip`,releasesUrl:`${OFFICIAL_REPOSITORY}/releases`,releaseApiUrl:OFFICIAL_RELEASE_API,
     packages:{windows:{url:armDesktop ? windowsArm64 : windowsX64,label:armDesktop ? 'Windows installer (ARM64)' : 'Windows installer (x64)',x64Url:windowsX64,x64Label:'Windows installer (x64)',arm64Url:windowsArm64,arm64Label:'Windows installer (ARM64)'},dgx:{url:`${prefix}/spark-ollama-manager_${version}_arm64.deb`,label:'DGX Spark package (ARM64)'},source:{url:`${OFFICIAL_REPOSITORY}/archive/refs/tags/v${version}.zip`,label:`Source archive (${version})`}},
-    update:{command,gitCommand:'git pull --ff-only',instructions},latest};
+    update:{command,gitCommand:sourceUpdateCommand,instructions},latest};
 }
 
 export async function createManager(options = {}) {

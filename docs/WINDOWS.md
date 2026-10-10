@@ -79,4 +79,4 @@ Use `--arm64` instead of `--x64` for the ARM64 installer. Installer files appear
 node desktop/smoke-packaged.mjs 'C:\absolute\install\path\Spark Ollama Manager.exe'
 ```
 
-This checks packaged backend health/version/authentication and renderer isolation. It does not download a model or establish real inference. The release workflow performs these build/install/smoke steps on matching Windows runners before publishing an installer.
+This launches the packaged app twice to check backend health/version/authentication, renderer isolation, saved origin and browser-storage persistence. It does not download a model or establish real inference. The release workflow performs these build/install/smoke steps on matching Windows runners before publishing an installer.

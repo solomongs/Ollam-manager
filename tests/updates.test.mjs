@@ -27,7 +27,7 @@ test('update metadata is authenticated, fixed-origin and read-only without an au
   assert.equal(result.data.installedVersion,'1.2.0');assert.equal(result.data.installedVersion,VERSION);
   assert.equal(result.data.platform,process.platform);assert.equal(result.data.arch,process.arch);assert.equal(result.data.installationMode,'source');assert.equal(result.data.latest.status,'not-checked');
   assert.equal(result.data.repositoryUrl,'https://github.com/solomongs/Ollam-manager');assert.equal(result.data.releaseApiUrl,RELEASE_API);
-  assert.equal(result.data.update.gitCommand,'git pull --ff-only');assert.match(result.data.update.command,/node scripts\/update\.mjs --check/);
+  assert.equal(result.data.update.gitCommand,'node scripts/update.mjs --check\nnode scripts/update.mjs');assert.equal(result.data.update.command,result.data.update.gitCommand);
   for(const packageInfo of Object.values(result.data.packages))assert.match(packageInfo.url,/^https:\/\/github\.com\/solomongs\/Ollam-manager\//);
   assert.match(result.data.packages.windows.x64Url,/Spark-Ollama-Manager-1\.2\.0-windows-x64-setup\.exe$/);
   assert.match(result.data.packages.windows.arm64Url,/Spark-Ollama-Manager-1\.2\.0-windows-arm64-setup\.exe$/);
@@ -59,11 +59,13 @@ test('unavailable, unsafe or prerelease metadata produces a usable cached update
 });
 
 test('update commands suit desktop, DGX package, service and container modes',async t=>{
-  for(const mode of ['desktop','deb','dgx','service','container']){
+  for(const mode of ['desktop','deb','dgx','service','source','container']){
     const f=await fixture(t,{installationMode:mode});const result=await f.get();assert.equal(result.data.installationMode,mode);assert.ok(result.data.update.instructions);
+    assert.equal(result.data.update.gitCommand,'node scripts/update.mjs --check\nnode scripts/update.mjs');
     if(mode==='desktop'||mode==='container')assert.equal(result.data.update.command,'');
     if(mode==='deb')assert.equal(result.data.update.command,'sudo apt install ./spark-ollama-manager_1.2.0_arm64.deb');
-    if(mode==='dgx'||mode==='service')assert.match(result.data.update.command,/sudo bash install\.sh$/);
+    if(mode==='source')assert.equal(result.data.update.command,result.data.update.gitCommand);
+    if(mode==='dgx'||mode==='service')assert.equal(result.data.update.command,result.data.update.gitCommand+'\nsudo bash install.sh');
   }
 });
 

@@ -4,8 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 
 const executable = process.argv[2];
+const expectedArch = process.argv[3];
 if (!executable || !path.isAbsolute(executable)) {
-  console.error('Usage: node desktop/smoke-packaged.mjs <absolute-packaged-executable>');
+  console.error('Usage: node desktop/smoke-packaged.mjs <absolute-packaged-executable> [x64|arm64]');
+  process.exit(2);
+}
+if (expectedArch && !['x64', 'arm64'].includes(expectedArch)) {
+  console.error('Expected packaged architecture must be x64 or arm64.');
   process.exit(2);
 }
 const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'spark-desktop-smoke-'));
@@ -28,6 +33,7 @@ try {
   });
     const result = JSON.parse(await fs.readFile(output, 'utf8'));
     if (!result.ok || !result.packaged || !result.rendererIsolated || result.authenticated !== false || !/^http:\/\/127\.0\.0\.1:\d+$/.test(result.origin)) throw new Error('Packaged smoke report failed verification.');
+    if (expectedArch && result.arch !== expectedArch) throw new Error(`Packaged app architecture ${result.arch} did not match ${expectedArch}.`);
     return result;
   }
   const first = await launch();

@@ -116,6 +116,8 @@ test('build configuration bundles only required runtime files and preserves per-
   assert.equal(pkg.build.nsis.allowElevation, false);
   assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
   assert.equal(pkg.build.nsis.buildUniversalInstaller, false);
+  assert.equal(pkg.devDependencies['electron-builder'], '26.15.6');
+  assert.equal(pkg.build.win.target, 'nsis');
   assert.equal(pkg.build.win.requestedExecutionLevel, 'asInvoker');
   assert.ok(pkg.build.extraResources[0].filter.includes('mcp-client.mjs'));
   assert.ok(!pkg.build.extraResources[0].filter.includes('**/*'));

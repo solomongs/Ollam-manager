@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -18,8 +18,10 @@ export async function sameCheckoutDirectory(selected, reported) {
   selected = resolve(selected); reported = resolve(reported);
   if (selected === reported) return true;
   try {
-    const [first, second] = await Promise.all([stat(selected, { bigint: true }), stat(reported, { bigint: true })]);
-    return first.isDirectory() && second.isDirectory() && first.dev === second.dev && first.ino === second.ino;
+    const [selectedPath, reportedPath] = await Promise.all([realpath(selected), realpath(reported)]);
+    if (selectedPath === reportedPath) return true;
+    const [first, second] = await Promise.all([stat(selectedPath, { bigint: true }), stat(reportedPath, { bigint: true })]);
+    return first.isDirectory() && second.isDirectory() && first.ino > 0n && second.ino > 0n && first.dev === second.dev && first.ino === second.ino;
   } catch { return false; }
 }
 

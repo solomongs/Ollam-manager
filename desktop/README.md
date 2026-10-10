@@ -11,7 +11,7 @@ npm --prefix desktop run build -- --win --x64
 npm --prefix desktop run build -- --win --arm64
 ```
 
-Build on Windows using the matching architecture. The pinned versions are Electron 44.7.0 and electron-builder 26.15.3. The backend, its public assets, and password reset script are copied to `resources/app`; wrapper code is packed in `resources/app.asar`. Runtime dependencies are supplied by Electron.
+Build on Windows using the matching architecture. The pinned versions are Electron 44.7.0 and electron-builder 26.15.6. This builder version fixes NSIS extraction of ARM64 executables. Each command builds only the selected architecture. The backend, its public assets, and password reset script are copied to `resources/app`; wrapper code is packed in `resources/app.asar`. Runtime dependencies are supplied by Electron.
 
 The unsigned per-user NSIS installers are named:
 

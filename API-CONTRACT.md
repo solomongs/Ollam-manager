@@ -65,7 +65,7 @@ Cookie sessions; all mutating API calls require `X-CSRF-Token` from session/logi
   },
   "update": {
     "command": "sudo apt install ./spark-ollama-manager_1.2.0_arm64.deb",
-    "gitCommand": "git pull --ff-only",
+    "gitCommand": "node scripts/update.mjs --check\nnode scripts/update.mjs",
     "instructions": "Download the official DGX ARM64 package, run the command from its download folder, and reopen the manager. The package keeps settings and model files separate from application code."
   },
   "latest": { "status": "not-checked" }
@@ -76,7 +76,7 @@ Cookie sessions; all mutating API calls require `X-CSRF-Token` from session/logi
 
 Only `check=1` is accepted; unknown or duplicate query parameters return HTTP 400. The release check always uses the literal `https://api.github.com/repos/solomongs/Ollam-manager/releases/latest`, validates and pins public DNS addresses, requires normal TLS verification, refuses redirects, limits its JSON response to 512 KiB and stops after five seconds. Server shutdown cancels pending checks. GitHub response URLs and asset URLs are ignored: package links are constructed from the fixed official repository, validated version and known filenames. Offline, unpublished or invalid release metadata produces `latest.status:"unavailable"` while retaining usable local metadata and instructions.
 
-The endpoint writes no application files and executes no commands. There is no POST update/download/install endpoint. `update.command`, `gitCommand` and `instructions` are copyable guidance: package users install a downloaded newer package, source users run `scripts/update.mjs` from a clean official Git checkout and restart/redeploy, and container users pull/recreate the official image while retaining their persistent volume. Desktop and container modes can return an empty `command` with platform-specific instructions. `gitCommand` applies to a source checkout only; it is not an updater for an installed `.exe` or `.deb`.
+The endpoint writes no application files and executes no commands. There is no POST update/download/install endpoint. `update.command`, `gitCommand` and `instructions` are copyable guidance: package users install a downloaded newer package, source users run `scripts/update.mjs` from a clean official Git checkout and restart/redeploy, and container users pull/recreate the official image while retaining their persistent volume. Desktop and container modes can return an empty `command` with platform-specific instructions. `gitCommand` always runs the guarded source updater's check followed by update; it verifies the official origin and refuses to overwrite ignored local credentials or state. It applies to a source checkout only; it is not an updater for an installed `.exe` or `.deb`.
 
 ## MCP connection endpoints
 

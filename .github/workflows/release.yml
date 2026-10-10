@@ -94,9 +94,29 @@ jobs:
           $installer = Get-ChildItem desktop/dist/*-windows-${{ matrix.arch }}-setup.exe | Select-Object -First 1
           if (-not $installer) { throw 'Windows installer missing' }
           $target = Join-Path $env:RUNNER_TEMP 'spark-installed'
-          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$target") -PassThru -Wait
+          Write-Host "Installing $($installer.Name) into $target"
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', '/currentuser', "/D=$target") -PassThru -Wait
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
-          node desktop/smoke-packaged.mjs "$target/Spark Ollama Manager.exe"
+          $required = @('Spark Ollama Manager.exe', 'resources/app.asar', 'resources/app/server.mjs', 'resources/app/public/index.html')
+          $deadline = (Get-Date).AddSeconds(60)
+          do {
+            $missing = @($required | Where-Object { -not (Test-Path (Join-Path $target $_) -PathType Leaf) })
+            if ($missing.Count -eq 0) { break }
+            Start-Sleep -Seconds 1
+          } while ((Get-Date) -lt $deadline)
+          if ($missing.Count -gt 0) {
+            Write-Host "Missing installed files: $($missing -join ', ')"
+            foreach ($folder in @($target, (Join-Path $env:LOCALAPPDATA 'Programs/Spark Ollama Manager'))) {
+              Write-Host "Installation directory: $folder"
+              Get-ChildItem -LiteralPath $folder -Recurse -ErrorAction SilentlyContinue | Select-Object -First 100 FullName, Length | Format-Table -AutoSize
+            }
+            foreach ($registry in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
+              Get-ItemProperty $registry -ErrorAction SilentlyContinue | Where-Object DisplayName -eq 'Spark Ollama Manager' | Select-Object DisplayName, DisplayVersion, InstallLocation, UninstallString | Format-List
+            }
+            Get-Process | Where-Object ProcessName -like '*Spark*' | Select-Object Id, ProcessName, Path | Format-Table -AutoSize
+            throw 'NSIS completed without installing the required application files.'
+          }
+          node desktop/smoke-packaged.mjs (Join-Path $target 'Spark Ollama Manager.exe') '${{ matrix.arch }}'
           if ($LASTEXITCODE -ne 0) { throw 'Desktop smoke failed' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
