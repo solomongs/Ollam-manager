@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -11,6 +11,16 @@ const defaultDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export function isTrustedOrigin(value) {
   return /^(?:https:\/\/github\.com\/solomongs\/Ollam-manager(?:\.git)?|git@github\.com:solomongs\/Ollam-manager(?:\.git)?|ssh:\/\/git@github\.com\/solomongs\/Ollam-manager(?:\.git)?)$/i.test(value);
+}
+
+/** Git may expand Windows 8.3 names or return another casing for the same directory. */
+export async function sameCheckoutDirectory(selected, reported) {
+  selected = resolve(selected); reported = resolve(reported);
+  if (selected === reported) return true;
+  try {
+    const [first, second] = await Promise.all([stat(selected, { bigint: true }), stat(reported, { bigint: true })]);
+    return first.isDirectory() && second.isDirectory() && first.dev === second.dev && first.ino === second.ino;
+  } catch { return false; }
 }
 
 export function runGit(args, { directory, hooksDirectory, git = 'git' }) {
@@ -47,7 +57,7 @@ export async function updateCheckout({ directory = defaultDirectory, check = fal
   const run = args => runner(args, { directory, hooksDirectory, git });
   try {
     const top = await run(['rev-parse', '--show-toplevel']);
-    if (resolve(top) !== directory) throw new Error('Run the updater from the project checkout root, or pass --repo with that root. Packaged installations must use their released installer.');
+    if (!await sameCheckoutDirectory(directory, top)) throw new Error('Run the updater from the project checkout root, or pass --repo with that root. Packaged installations must use their released installer.');
     const origins = (await run(['config', '--get-all', 'remote.origin.url'])).split(/\r?\n/);
     if (origins.length !== 1 || !isTrustedOrigin(origins[0])) throw new Error(`The checkout origin must be ${SOURCE_URL}. Nothing was fetched.`);
     const branch = await run(['symbolic-ref', '--short', 'HEAD']);

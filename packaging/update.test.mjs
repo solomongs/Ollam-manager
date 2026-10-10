@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { join } from 'node:path';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { SOURCE_URL, isTrustedOrigin, updateCheckout, runGit } from '../scripts/update.mjs';
+import { SOURCE_URL, isTrustedOrigin, sameCheckoutDirectory, updateCheckout, runGit } from '../scripts/update.mjs';
 
 const directory = resolve('/tmp/spark-checkout-fixture');
 const current = 'a'.repeat(40), target = 'b'.repeat(40);
@@ -32,6 +32,19 @@ function fixture(overrides = {}) {
 test('only the fixed GitHub project origins are trusted', () => {
   for (const url of [SOURCE_URL, 'git@github.com:solomongs/Ollam-manager.git', 'ssh://git@github.com/solomongs/Ollam-manager.git']) assert.equal(isTrustedOrigin(url), true);
   for (const url of ['https://github.com/attacker/Ollam-manager.git', SOURCE_URL + '?extra=x', 'https://github.com.evil.test/solomongs/Ollam-manager.git', 'https://token@github.com/solomongs/Ollam-manager.git', 'file:///tmp/repo']) assert.equal(isTrustedOrigin(url), false);
+});
+
+test('checkout root identity accepts filesystem aliases and refuses a different directory', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'spark-git-root-'));
+  try {
+    const selected = join(workspace, 'repo'), other = join(workspace, 'other');
+    mkdirSync(selected); mkdirSync(other);
+    const alias = join(workspace, 'alias');
+    symlinkSync(selected, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.equal(await sameCheckoutDirectory(selected, alias), true);
+    assert.equal(await sameCheckoutDirectory(selected, other), false);
+    assert.equal(await sameCheckoutDirectory(selected, join(workspace, 'missing')), false);
+  } finally { rmSync(workspace, { recursive: true, force: true }); }
 });
 
 test('check only reads the remote branch and does not fetch or merge', async () => {
